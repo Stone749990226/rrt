@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timedelta
 import cProfile
-import numpy as np
 import requests
 import cv2
 from io import BytesIO

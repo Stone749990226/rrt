@@ -5,10 +5,8 @@ from fastapi import HTTPException
 import math
 import matplotlib.pyplot as plt
 import os
-import cv2
 import numpy as np
 import logging
-import numpy as np
 import time
 from datetime import datetime, timedelta
 from matplotlib import pyplot as plt
@@ -79,7 +77,7 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
     # 读取第一个图像以获取地图大小
     sample_img = np.array(Image.open(image_files[0]).convert('L'))
 
-    map_shape = sample_img.shape  # 获取地图尺寸
+    map_shape = (config["height"], config["width"])  # 获取地图尺寸
 
     # 初始化最终的综合障碍物地图
     combined_map = np.zeros(map_shape, dtype=np.uint8)

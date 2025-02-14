@@ -7,4 +7,4 @@ path_len_diff: 0.5
 animation: false
 speed: 6
 map_interval: 15
-env_mode: local
+env_mode: server

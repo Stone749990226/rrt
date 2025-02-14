@@ -10,6 +10,7 @@ with open('rrt_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 animation = config["animation"]
+np.random.seed(42)
 
 
 class node:
