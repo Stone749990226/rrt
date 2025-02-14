@@ -48,8 +48,8 @@ formatter = logging.Formatter(
 
 ch.setFormatter(formatter)
 fh.setFormatter(formatter)
-logger.addHandler(ch) #将日志输出至屏幕
-logger.addHandler(fh) #将日志输出至文件
+logger.addHandler(ch)  # 将日志输出至屏幕
+logger.addHandler(fh)  # 将日志输出至文件
 # 创建 FastAPI 应用
 app = FastAPI()
 
@@ -67,14 +67,17 @@ app.add_middleware(
 )
 
 # 定义请求体模型
+
+
 class Point(BaseModel):
     lat: float
     lon: float
 
+
 class RequestBody(BaseModel):
     start: Point
     end: Point
-    speed: float # km/h
+    speed: float  # km/h
     time_step: int
     mark_time: str
     start_time: str
@@ -82,13 +85,17 @@ class RequestBody(BaseModel):
     structure_size: int
 
 # 定义返回值模型
+
+
 class Waypoint(Point):
     reach_time: str  # 添加额外的类型字段
+
 
 class Route(BaseModel):
     start_point: Point
     end_point: Point
     waypoints: List[Waypoint]
+
 
 class Summary(BaseModel):
     # distance_pix: float
@@ -97,26 +104,32 @@ class Summary(BaseModel):
     find_path: bool
     detail: str
 
+
 class ResponseBody(BaseModel):
     route: Route
     summary: Summary
-    
+
 # 定义计算逻辑
+
+
 def calculate_response(data: RequestBody) -> ResponseBody:
-    logging.warning(data)
     global start_time, mark_time, speed
     # 需要将传入的km/h转换为km/min，由于图片一个像素点是4km，还要除以4
     speed = data.speed / 60 // 4
     row_start, col_start = pos2pix(data.start.lat, data.start.lon)
     row_goal, col_goal = pos2pix(data.end.lat, data.end.lon)
-    start_time = datetime.strptime(data.start_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
-    mark_time = datetime.strptime(data.mark_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
+    start_time = datetime.strptime(
+        data.start_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
+    mark_time = datetime.strptime(
+        data.mark_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
     png_paths = get_images_path(start_time, mark_time)
-    
+
     w, h = get_wh(png_paths[0])
-    
-    rrt_agent = rrt(w, h, step_size, end_lim, node(row_start, col_start), node(row_goal, col_goal))
-    rrt_agent.set_col_map(generate_combined_map(png_paths,speed=speed, start_point=(row_start, col_start), start_time=start_time))
+
+    rrt_agent = rrt(w, h, step_size, end_lim, node(
+        row_start, col_start), node(row_goal, col_goal))
+    rrt_agent.set_col_map(generate_combined_map(
+        png_paths, speed=speed, start_point=(row_start, col_start), start_time=start_time))
     plt.imshow(rrt_agent.col_map, cmap='gray')
     plt.scatter(col_start, row_start)
     plt.scatter(col_goal, row_goal)
@@ -137,9 +150,9 @@ def calculate_response(data: RequestBody) -> ResponseBody:
     path = rrt_agent.search_path()
     # profiler.disable()  # 停止性能分析
     # profiler.print_stats(sort="time")  # 输出性能分析结果
-  
+
     logging.info(path)
-    
+
     start_utc = datetime.strptime(data.start_time, "%Y-%m-%d %H:%M")
     start_utc = pytz.utc.localize(start_utc)  # 设置为UTC时区
     beijing_tz = pytz.timezone('Asia/Shanghai')
@@ -151,14 +164,16 @@ def calculate_response(data: RequestBody) -> ResponseBody:
     for p in path:
         p[0], p[1] = int(p[0]), int(p[1])
         if lat is not None:
-            total_km += haversine(lookup_table[p[0], p[1], 0], lookup_table[p[0], p[1], 1], lat, lon)
+            total_km += haversine(lookup_table[p[0], p[1], 0],
+                                  lookup_table[p[0], p[1], 1], lat, lon)
         lat = lookup_table[p[0], p[1], 0]
         lon = lookup_table[p[0], p[1], 1]
         time = total_km / data.speed
         end_utc = start_utc + timedelta(hours=time)
         end_beijing = end_utc.astimezone(beijing_tz)
-        waypoints.append(Waypoint(lat=lat, lon=lon, reach_time=end_beijing.strftime("%Y-%m-%d %H:%M")))
-    
+        waypoints.append(
+            Waypoint(lat=lat, lon=lon, reach_time=end_beijing.strftime("%Y-%m-%d %H:%M")))
+
     # 构造响应
     route = Route(
         start_point=data.start,
@@ -198,5 +213,5 @@ if __name__ == "__main__":
         "threshold": 0,
         "structure_size": 5
     }
-    
+
     print(calculate_response(RequestBody(**request_data)))

@@ -18,12 +18,15 @@ from matplotlib.widgets import Button
 from scipy.ndimage import binary_dilation
 import re
 
+
 maps = {}
 lookup_table = np.load('cloud_latlon_lookup_table_average.npy')
 
-def align_time_15m(time_str:str):
+
+def align_time_15m(time_str: str):
     time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
-    aligned_time = time_obj.replace(minute=(time_obj.minute // 15) * 15, second=0, microsecond=0)
+    aligned_time = time_obj.replace(
+        minute=(time_obj.minute // 15) * 15, second=0, microsecond=0)
     return aligned_time.strftime("%Y%m%d%H%M")
 
 
@@ -42,11 +45,13 @@ def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
                 if time_obj > start_time_obj - timedelta(minutes=15):
                     res.append(os.path.abspath(os.path.join(root, file)))
     if len(res) == 0:
-        raise HTTPException(status_code=404, detail=f"Image not found for the dir: {dir}")
+        raise HTTPException(
+            status_code=404, detail=f"Image not found for the dir: {dir}")
     res.sort()
     mark_time_obj = datetime.strptime(mark_time, "%Y%m%d%H%M")
     if start_time_obj - mark_time_obj < timedelta(minutes=15):
-        res.insert(0, "/data/ImageData/"+start_time[:8]+"/11/real/" + align_time_15m(start_time) + ".png")
+        res.insert(0, "/data/ImageData/" +
+                   start_time[:8]+"/11/real/" + align_time_15m(start_time) + ".png")
     for path in res:
         if not os.path.exists(path):
             print(f"{path} 不存在")
@@ -54,13 +59,13 @@ def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
     return res
 
 
-def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold = 0, safety_radius = 5):
+def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold=0, safety_radius=5):
     """speed: 每分钟移动的像素格子数"""
-    
+
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
     # 读取第一个图像以获取地图大小
     sample_img = np.array(Image.open(image_files[0]).convert('L'))
-    
+
     map_shape = sample_img.shape  # 获取地图尺寸
 
     # 初始化最终的综合障碍物地图
@@ -81,7 +86,8 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         # 计算当前时间步的半径范围
         time_str = re.search(r'(\d{12})(?=\.png)', image_path).group(0)
         time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
-        min_radius = (time_obj + timedelta(minutes=15) - start_time_obj).total_seconds() / 60 * speed
+        min_radius = (time_obj + timedelta(minutes=15) -
+                      start_time_obj).total_seconds() / 60 * speed
         # 读取并处理图像
         t = datetime.strptime(os.path.basename(image_path)[:12], "%Y%m%d%H%M")
         gray_array = np.array(Image.open(image_path).convert('L'))
@@ -101,6 +107,7 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         combined_map[(bin_map == 1) & annulus_mask] = 1
 
     return combined_map
+
 
 def insert_intermediate_points(path, threshold_distance):
     new_path = [path[0]]  # 保持起点不变
@@ -126,13 +133,16 @@ def insert_intermediate_points(path, threshold_distance):
 
     return new_path
 
+
 def get_wh(image_path: str):
     img = Image.open(image_path)
     return (img.width, img.height)
 
+
 def pos2pix(lat, lon):
     # 找到距离最近的像素点
-    diff = np.sqrt((lookup_table[:, :, 0] - lat) ** 2 + (lookup_table[:, :, 1] - lon) ** 2)
+    diff = np.sqrt((lookup_table[:, :, 0] - lat) **
+                   2 + (lookup_table[:, :, 1] - lon) ** 2)
     i, j = np.unravel_index(np.argmin(diff), diff.shape)
     logging.info(f"(lat {lat}, lon {lon}) pix: row {i}, col {j})")
     return i, j
@@ -145,16 +155,19 @@ def haversine(lat1, lon1, lat2, lon2):
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
-    
-    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * \
+        math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    
+
     # 计算并返回距离
     return R * c
+
 
 if __name__ == "__main__":
     start_time = "202411130715"
     image_files = get_images_path(start_time, mark_time="202411130700")
-    combined_map = generate_combined_map(image_files, 6, (600, 600), start_time)
+    combined_map = generate_combined_map(
+        image_files, 6, (600, 600), start_time)
     plt.imshow(combined_map, cmap='gray')
     plt.savefig("temp.png")

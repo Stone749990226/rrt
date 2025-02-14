@@ -6,7 +6,8 @@ from utils import insert_intermediate_points
 import numpy as np
 
 
-animation = False
+animation = True
+
 
 class node:
     """each node has varieties:row,col,father"""
@@ -158,8 +159,7 @@ class rrt:
                 current_y += sy
 
         return False
-    
-    
+
     def point_in_obstacle(self, point):
         return self.col_map[point[0]][point[1]] == 1
 
@@ -472,7 +472,7 @@ class rrt:
                 self.update_path()
                 self.t_iter_end = time.time()
                 print('第 %d 次迭代的路径长度为：' % (i+1), self.path_length,
-                    '时间为：', self.t_iter_end - self.t_iter_begin)
+                      '时间为：', self.t_iter_end - self.t_iter_begin)
             print('最优路径长度为：', self.less_long_path)
             t_t_search_end = time.time()
             print('总时间为:', t_t_search_end - self.t_search_begin)
@@ -481,7 +481,8 @@ class rrt:
         self.path_final = []
         for i in path_end:
             self.path_final.append([i.row, i.col])
-        self.path_final = insert_intermediate_points(self.path_final, self.speed * 15)
+        self.path_final = insert_intermediate_points(
+            self.path_final, self.speed * 15)
         if animation:
             x_vals = [point[0] for point in self.path_final]
             y_vals = [point[1] for point in self.path_final]
