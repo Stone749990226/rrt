@@ -136,7 +136,8 @@ def calculate_response(data: RequestBody) -> ResponseBody:
             find_path=False,
             detail="start or end point is in obstacle"
         )
-        return ResponseBody(route, summary)
+        logging.error("start or end point is in obstacle")
+        return ResponseBody(route=route, summary=summary)
     path = rrt_agent.search_path()
     # profiler.disable()  # 停止性能分析
     # profiler.print_stats(sort="time")  # 输出性能分析结果
