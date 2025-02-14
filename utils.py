@@ -54,7 +54,7 @@ def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
     return res
 
 
-def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold = 0, safety_radius = 3):
+def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold = 0, safety_radius = 5):
     """speed: 每分钟移动的像素格子数"""
     
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
@@ -82,7 +82,6 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         time_str = re.search(r'(\d{12})(?=\.png)', image_path).group(0)
         time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
         min_radius = (time_obj + timedelta(minutes=15) - start_time_obj).total_seconds() / 60 * speed
-
         # 读取并处理图像
         t = datetime.strptime(os.path.basename(image_path)[:12], "%Y%m%d%H%M")
         gray_array = np.array(Image.open(image_path).convert('L'))
@@ -154,10 +153,8 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * c
 
 if __name__ == "__main__":
-    start_time = "202501081200"
-    image_files = get_images_path(start_time, mark_time="202501081200")
-    for l in image_files:
-        print(l)
+    start_time = "202411130715"
+    image_files = get_images_path(start_time, mark_time="202411130700")
     combined_map = generate_combined_map(image_files, 6, (600, 600), start_time)
     plt.imshow(combined_map, cmap='gray')
     plt.savefig("temp.png")

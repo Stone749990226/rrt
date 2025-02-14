@@ -103,7 +103,9 @@ class ResponseBody(BaseModel):
     
 # 定义计算逻辑
 def calculate_response(data: RequestBody) -> ResponseBody:
+    logging.warning(data)
     global start_time, mark_time, speed
+    # 需要将传入的km/h转换为km/min，由于图片一个像素点是4km，还要除以4
     speed = data.speed / 60 // 4
     row_start, col_start = pos2pix(data.start.lat, data.start.lon)
     row_goal, col_goal = pos2pix(data.end.lat, data.end.lon)
@@ -112,9 +114,26 @@ def calculate_response(data: RequestBody) -> ResponseBody:
     png_paths = get_images_path(start_time, mark_time)
     
     w, h = get_wh(png_paths[0])
-    # 需要将传入的km/h转换为km/min，由于图片一个像素点是4km，还要除以4
+    
     rrt_agent = rrt(w, h, step_size, end_lim, node(row_start, col_start), node(row_goal, col_goal))
     rrt_agent.set_col_map(generate_combined_map(png_paths,speed=speed, start_point=(row_start, col_start), start_time=start_time))
+    plt.imshow(rrt_agent.col_map, cmap='gray')
+    plt.scatter(col_start, row_start)
+    plt.scatter(col_goal, row_goal)
+    plt.savefig("col_map.png")
+    if rrt_agent.point_in_obstacle((row_start, col_start)) or rrt_agent.point_in_obstacle((row_goal, col_goal)):
+        route = Route(
+            start_point=data.start,
+            end_point=data.end,
+            waypoints=[],
+        )
+        summary = Summary(
+            distance_haversine=0,
+            estimated_time=0,
+            find_path=False,
+            detail="start or end point is in obstacle"
+        )
+        return ResponseBody(route, summary)
     path = rrt_agent.search_path()
     # profiler.disable()  # 停止性能分析
     # profiler.print_stats(sort="time")  # 输出性能分析结果
@@ -155,6 +174,7 @@ def calculate_response(data: RequestBody) -> ResponseBody:
     )
     return ResponseBody(route=route, summary=summary)
 
+
 # 定义 POST 路由
 @app.post("/api/route", response_model=ResponseBody)
 async def calculate_route(request: RequestBody):
@@ -164,18 +184,19 @@ async def calculate_route(request: RequestBody):
 if __name__ == "__main__":
     request_data = {
         "start": {
-            "lat": 43.123,
-            "lon": 82.21341
+            "lat": 23.885837699862005,
+            "lon": 108.76464843750001
         },
         "end": {
-            "lat": 41.2304,
-            "lon": 91.4737
+            "lat": 20.138470312451155,
+            "lon": 120.76171875000001
         },
-        "speed": 600,
+        "start_time": "2024-11-13 07:15",
+        "mark_time": "2024-11-13 07:00",
+        "speed": 500,
         "time_step": 15,
-        "mark_time": "2025-01-06 18:30",
-        "start_time": "2025-01-06 19:44",
         "threshold": 0,
         "structure_size": 5
     }
+    
     print(calculate_response(RequestBody(**request_data)))

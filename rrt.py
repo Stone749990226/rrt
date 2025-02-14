@@ -158,6 +158,10 @@ class rrt:
                 current_y += sy
 
         return False
+    
+    
+    def point_in_obstacle(self, point):
+        return self.col_map[point[0]][point[1]] == 1
 
     def spring(self, flag, mk_dir_flag=1):
         new_r = int(self.height * np.random.rand())
