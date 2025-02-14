@@ -2,11 +2,14 @@ import logging
 import time
 from matplotlib import patches, pyplot as plt
 from matplotlib.widgets import Button
+import yaml
 from utils import insert_intermediate_points
 import numpy as np
 
+with open('rrt_config.yaml', 'r') as f:
+    config = yaml.safe_load(f)
 
-animation = True
+animation = config["animation"]
 
 
 class node:
@@ -348,9 +351,9 @@ class rrt:
             #     exit()
             # 1. 如果当前路径和上次路径长度差异小于 0.5 且路径已经收敛，则退出。
             # 2. 如果 算法运行时间超过 0.5 秒，且至少已经找到一条路径，则退出
-            if abs(self.last_path_length - self.less_long_path) < path_len_diff and len(self.path_all) > 1 and self.last_path_length != self.less_long_path \
+            if abs(self.last_path_length - self.less_long_path) < config["path_len_diff"] and len(self.path_all) > 1 and self.last_path_length != self.less_long_path \
                     or \
-                    now-self.t_iter_begin > max_iter_time and len(self.path_all) > 0:
+                    now-self.t_iter_begin > config["max_iter_time"] and len(self.path_all) > 0:
                 self.is_success = False
                 print("当前算法已经收敛了")
                 return 0
@@ -452,6 +455,7 @@ class rrt:
     def search_path(self, iternation=100, max_search_time=10):
         if self.has_collision(self.start, self.end, 0) is False:
             logging.info("起点和终点的连线没有障碍物，可以直接通行")
+            self.path = [[self.start, self.end]]
             self.path_all = [[self.start, self.end]]
             if animation:
                 self.draw_path()

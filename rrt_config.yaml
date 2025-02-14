@@ -1,0 +1,10 @@
+height: 1060
+width: 1824
+step_size: 50
+end_lim: 50
+max_iter_time: 5
+path_len_diff: 0.5
+animation: false
+speed: 6
+map_interval: 15
+env_mode: local

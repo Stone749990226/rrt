@@ -18,17 +18,13 @@ from scipy.spatial.transform import Rotation as Rot
 import logging
 from matplotlib import patches, pyplot as plt
 from fastapi.middleware.cors import CORSMiddleware
-from utils import generate_combined_map, get_images_path, get_wh, haversine, lookup_table, pos2pix
+from utils import generate_combined_map, get_wh, haversine, lookup_table, pos2pix, get_images_path
 from rrt import node, rrt
 
+from config import config
 # 全局变量
-height = None
-width = None
-step_size = 50
-end_lim = 50
-max_iter_time = 5
-path_len_diff = 0.5
-animation = False
+
+animation = config["animation"]
 maps = {}
 speed = 6  # 每分钟能走多少像素格子
 map_interval = 15  # 地图切换间隔为15分钟
@@ -124,16 +120,11 @@ def calculate_response(data: RequestBody) -> ResponseBody:
         data.mark_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
     png_paths = get_images_path(start_time, mark_time)
 
-    w, h = get_wh(png_paths[0])
-
-    rrt_agent = rrt(w, h, step_size, end_lim, node(
+    rrt_agent = rrt(config["width"], config["height"], config["step_size"], config["end_lim"], node(
         row_start, col_start), node(row_goal, col_goal))
     rrt_agent.set_col_map(generate_combined_map(
         png_paths, speed=speed, start_point=(row_start, col_start), start_time=start_time))
-    plt.imshow(rrt_agent.col_map, cmap='gray')
-    plt.scatter(col_start, row_start)
-    plt.scatter(col_goal, row_goal)
-    plt.savefig("col_map.png")
+
     if rrt_agent.point_in_obstacle((row_start, col_start)) or rrt_agent.point_in_obstacle((row_goal, col_goal)):
         route = Route(
             start_point=data.start,
@@ -199,12 +190,12 @@ async def calculate_route(request: RequestBody):
 if __name__ == "__main__":
     request_data = {
         "start": {
-            "lat": 23.885837699862005,
-            "lon": 108.76464843750001
+            "lat": 18.187606552494625,
+            "lon": 117.02636718750001
         },
         "end": {
-            "lat": 20.138470312451155,
-            "lon": 120.76171875000001
+            "lat": 11.781325296112277,
+            "lon": 134.38476562500003
         },
         "start_time": "2024-11-13 07:15",
         "mark_time": "2024-11-13 07:00",

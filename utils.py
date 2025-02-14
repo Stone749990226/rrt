@@ -18,7 +18,7 @@ from matplotlib.widgets import Button
 from scipy.ndimage import binary_dilation
 import re
 
-
+from config import config
 maps = {}
 lookup_table = np.load('cloud_latlon_lookup_table_average.npy')
 
@@ -34,24 +34,37 @@ def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
     """/data/ImageData/20241206/11/cloud_dugs_unet_3h/16-45"""
     res = []
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
-    date = mark_time[:8]
-    hm = mark_time[8:10] + "-" + mark_time[10:12]
-    dir = prefix + date + "/11/cloud_dugs_unet_3h/" + hm
-    for root, dirs, files in os.walk(dir):
-        for file in files:
-            if file.endswith('.png'):
-                time_str = file.split('.')[0]
-                time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
-                if time_obj > start_time_obj - timedelta(minutes=15):
-                    res.append(os.path.abspath(os.path.join(root, file)))
-    if len(res) == 0:
-        raise HTTPException(
-            status_code=404, detail=f"Image not found for the dir: {dir}")
-    res.sort()
-    mark_time_obj = datetime.strptime(mark_time, "%Y%m%d%H%M")
-    if start_time_obj - mark_time_obj < timedelta(minutes=15):
-        res.insert(0, "/data/ImageData/" +
-                   start_time[:8]+"/11/real/" + align_time_15m(start_time) + ".png")
+    if config["env_mode"] == "local":
+        for root, dirs, files in os.walk("./07-00"):
+            for file in files:
+                if file.endswith('.png'):
+                    time_str = file.split('.')[0]
+                    time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
+                    if time_obj > start_time_obj - timedelta(minutes=15):
+                        res.append(os.path.abspath(os.path.join(root, file)))
+        if len(res) == 0:
+            raise HTTPException(
+                status_code=404, detail=f"Image not found for the dir: {dir}")
+        res.sort()
+    elif config["env_mode"] == "server":
+        date = mark_time[:8]
+        hm = mark_time[8:10] + "-" + mark_time[10:12]
+        dir = prefix + date + "/11/cloud_dugs_unet_3h/" + hm
+        for root, dirs, files in os.walk(dir):
+            for file in files:
+                if file.endswith('.png'):
+                    time_str = file.split('.')[0]
+                    time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
+                    if time_obj > start_time_obj - timedelta(minutes=15):
+                        res.append(os.path.abspath(os.path.join(root, file)))
+        if len(res) == 0:
+            raise HTTPException(
+                status_code=404, detail=f"Image not found for the dir: {dir}")
+        res.sort()
+        mark_time_obj = datetime.strptime(mark_time, "%Y%m%d%H%M")
+        if start_time_obj - mark_time_obj < timedelta(minutes=15):
+            res.insert(0, "/data/ImageData/" +
+                       start_time[:8]+"/11/real/" + align_time_15m(start_time) + ".png")
     for path in res:
         if not os.path.exists(path):
             print(f"{path} 不存在")
