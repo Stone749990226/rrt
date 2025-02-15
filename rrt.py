@@ -6,7 +6,7 @@ import time
 from matplotlib import patches, pyplot as plt
 from matplotlib.widgets import Button
 import yaml
-from utils import insert_intermediate_points
+from utils import generate_combined_map, get_images_path, insert_intermediate_points
 import numpy as np
 
 with open('rrt_config.yaml', 'r') as f:
@@ -15,30 +15,30 @@ with open('rrt_config.yaml', 'r') as f:
 animation = config["animation"]
 
 
-class node:
-    """each node has varieties:row,col,father"""
+class Node:
+    """each node has varieties:row,col,parent"""
 
     def __init__(self, r=0, c=0, f=None):
         self.row = r
         self.col = c
-        self.father = f
+        self.parent = f
         self.distance = 0
-        father = self.father
+        parent = self.parent
         # 如果路径发生了变动时（例如，节点可能会被修改或重连），循环计算distance才比较准确。
         while True:
-            if father == None:
+            if parent == None:
                 break
-            self.distance += np.sqrt((r-father.row)**2+(c-father.col)**2)
-            r = father.row
-            c = father.col
-            father = father.father
+            self.distance += np.sqrt((r-parent.row)**2+(c-parent.col)**2)
+            r = parent.row
+            c = parent.col
+            parent = parent.parent
 
     def __str__(self):
         return f"({self.row}, {self.col})"
 
 
-class rrt:
-    def __init__(self, width, height, step_size, end_lim, start: node, end: node, speed=6) -> None:
+class RRT:
+    def __init__(self, width, height, step_size, end_lim, start: Node, end: Node, speed=6) -> None:
         np.random.seed(42)
         self.t_iter_begin = time.time()
         # initial map & window
@@ -55,13 +55,19 @@ class rrt:
         self.Co = []
 
         # node list
-        # list1 和 list2 是分别从起点和终点开始生长的两棵 RRT* 树
-        self.list1 = [self.start]
-        self.list2 = [self.end]
+        # start_tree 和 end_tree 是分别从起点和终点开始生长的两棵 RRT* 树
+        self.start_tree = [self.start]
+        self.end_tree = [self.end]
 
         self.less_long_path = np.inf
         self.last_path_length = np.inf
         self.path_all = []
+
+        self.adaptive_params = {
+            'goal_bias_base': 0.3,
+            'density_radius': 7,
+            'min_step_ratio': 0.2
+        }
 
         if animation:
             self.fig, self.ax = plt.subplots(figsize=(12, 7))
@@ -101,10 +107,10 @@ class rrt:
         if event.inaxes != self.ax:  # 如果点击的区域不是坐标轴区域
             return
         # 获取点击的坐标（取整）
-        clicked_point = node(round(event.ydata), round(event.xdata), None)
+        clicked_point = Node(round(event.ydata), round(event.xdata), None)
         if self.mode == 'start':
             self.start = clicked_point
-            self.list1 = [self.start]
+            self.start_tree = [self.start]
             print(f"Start point set at: {self.start}")
             self.ax.scatter(self.start.col, self.start.row,
                             c='red', label='Start', zorder=5, s=3)
@@ -113,7 +119,7 @@ class rrt:
             print("Now, click to set the end point.")
         elif self.mode == 'end':
             self.end = clicked_point
-            self.list2 = [self.end]
+            self.end_tree = [self.end]
             print(f"End point set at: {self.end}")
             self.ax.scatter(self.end.col, self.end.row,
                             c='blue', label='End', zorder=5, s=3)
@@ -134,7 +140,7 @@ class rrt:
             self.fig.canvas.draw()
             plt.pause(0.1)  # 暂停0.1秒
 
-    def has_collision(self, node1: node, node2: node, flag: int) -> bool:
+    def has_collision(self, node1: Node, node2: Node, flag: int) -> bool:
         # 使用 Bresenham 算法生成路径上的所有网格点，检查是否有障碍物
         x0, y0 = int(node1.row), int(node1.col)
         x1, y1 = int(node2.row), int(node2.col)
@@ -151,9 +157,9 @@ class rrt:
             # 检查当前网格点是否碰撞
             if self.col_map[current_x][current_y] > 0:
                 if flag == 2:
-                    aa = self.list1.copy()
-                    self.list1 = self.list2.copy()
-                    self.list2 = aa.copy()
+                    aa = self.start_tree .copy()
+                    self.start_tree = self.end_tree .copy()
+                    self.end_tree = aa.copy()
                 return True
             if current_x == x1 and current_y == y1:
                 break
@@ -170,29 +176,57 @@ class rrt:
     def point_in_obstacle(self, point):
         return self.col_map[point[0]][point[1]] == 1
 
+    def calculate_obstacle_density(self, row, col):
+        """计算节点周围障碍物密度"""
+        radius = self.adaptive_params['density_radius']
+        min_row = max(0, int(row)-radius)
+        max_row = min(self.height-1, int(row)+radius)
+        min_col = max(0, int(col)-radius)
+        max_col = min(self.width-1, int(col)+radius)
+
+        obstacle_count = np.sum(
+            self.col_map[min_row:max_row+1, min_col:max_col+1])
+        area = (max_row - min_row + 1) * (max_col - min_col + 1)
+        return obstacle_count / area if area > 0 else 0
+
+    def get_adaptive_step(self, density):
+        """根据障碍物密度计算自适应步长"""
+        min_step = self.step_size * self.adaptive_params['min_step_ratio']
+        return self.step_size * (1 - density) + min_step * density
+
     def spring(self, flag, mk_dir_flag=1):
+        # 障碍物感知参数
+        MAX_GOAL_BIAS = 0.7  # 最大目标偏置概率
+        MIN_GOAL_BIAS = 0.1  # 最小目标偏置概率
+        DENSITY_THRESHOLD = 0.3  # 密度阈值
+
         new_r = int(self.height * np.random.rand())
         new_c = int(self.width * np.random.rand())
         bias = 2
         # mk_dir_flag 控制是否进行受限区域采样（即是否要在 Informed RRT* 的椭圆范围内采样）TODO: 优化
-        while mk_dir_flag:
-            if np.sqrt((new_r - self.start.row) ** 2 + (new_c - self.start.col) ** 2) + np.sqrt(
-                    (new_r - self.end.row) ** 2 + (new_c - self.end.col) ** 2) <= self.path_length + bias:
-                break
+        if mk_dir_flag:
+            bias = 2
+            while True:
+                new_r = int(self.height * np.random.rand())
+                new_c = int(self.width * np.random.rand())
+                if np.sqrt((new_r - self.start.row)**2 + (new_c - self.start.col)**2) + \
+                   np.sqrt((new_r - self.end.row)**2 + (new_c - self.end.col)**2) <= self.path_length + bias:
+                    break
+        else:
             new_r = int(self.height * np.random.rand())
             new_c = int(self.width * np.random.rand())
 
         # 双向RRT，交替扩展
         if flag == 2:
-            aa = self.list1.copy()
-            self.list1 = self.list2.copy()
-            self.list2 = aa.copy()
+            aa = self.start_tree .copy()
+            self.start_tree = self.end_tree .copy()
+            self.end_tree = aa.copy()
         # "Near". find rule:only the distance
-        # 遍历 list1 中所有节点，找到 欧几里得距离最近的节点 temp_node
+        # 遍历 start_tree 中所有节点，找到 欧几里得距离最近的节点 temp_node
         min_node = float('inf')
-        temp_node = node()
-        for i in range(len(self.list1)):
-            temp = self.list1[i]
+        temp_node = Node()
+        for i in range(len(self.start_tree)):
+            temp = self.start_tree[i]
             dis_r = temp.row - new_r
             dis_c = temp.col - new_c
             distance = dis_r ** 2 + dis_c ** 2
@@ -206,7 +240,7 @@ class rrt:
 
         if distance <= self.step_size:
             # 如果最近的节点与新节点的距离 小于步长，直接创建 new_node 连接 temp_node
-            new_node = node(new_r, new_c, temp_node)
+            new_node = Node(new_r, new_c, temp_node)
 
         else:
             # 如果 大于步长，则沿着 temp_node → (new_r, new_c) 方向移动 step_size 进行扩展，创建 new_node
@@ -214,18 +248,18 @@ class rrt:
                 self.step_size / distance + temp_node.row
             add_col = (new_c - temp_node.col) * \
                 self.step_size / distance + temp_node.col
-            new_node = node(add_row, add_col, temp_node)
+            new_node = Node(add_row, add_col, temp_node)
 
         # rewire
         '''
-        for temp in self.list1:
+        for temp in self.start_tree:
             distance = np.sqrt((new_node.col-temp.col)**2 +
                                (new_node.row-temp.row)**2)
             if distance < int(self.step_size):
-                if temp == new_node.father or temp == self.start or temp == self.end:
+                if temp == new_node.parent or temp == self.start or temp == self.end:
                     continue
                 if distance+new_node.distance < temp.distance:
-                    temp.father = new_node
+                    temp.parent = new_node
                     temp.distance = distance+new_node.distance
         '''
 
@@ -246,14 +280,14 @@ class rrt:
             plt.pause(0.01)
 
         # add the new node into node list
-        self.list1.append(new_node)
+        self.start_tree .append(new_node)
 
         # the tree birthed from the end node;
         # 在第一颗树和新节点作用完成后，去考虑另一个树，从原来的树开始一直往new node连接，一直到撞到障碍物或者连接到new node（搜索结束）
         min_node = float('inf')
-        temp_node = node()
-        for i in range(len(self.list2)):
-            temp = self.list2[i]
+        temp_node = Node()
+        for i in range(len(self.end_tree)):
+            temp = self.end_tree[i]
             dis_r = temp.row - new_node.row
             dis_c = temp.col - new_node.col
             distance = dis_r ** 2 + dis_c ** 2
@@ -265,13 +299,13 @@ class rrt:
         # "Steer" and "Edge". link nodes
         distance = np.sqrt(min_node)
         if distance <= self.step_size:
-            new_node2 = node(new_node.row, new_node.col, temp_node)
+            new_node2 = Node(new_node.row, new_node.col, temp_node)
         else:
             add_row = (new_r - temp_node.row) * \
                 self.step_size / distance + temp_node.row
             add_col = (new_c - temp_node.col) * \
                 self.step_size / distance + temp_node.col
-            new_node2 = node(add_row, add_col, temp_node)
+            new_node2 = Node(add_row, add_col, temp_node)
 
         # check collision: whether the path is in the collision!
         if self.has_collision(temp_node, new_node2, flag):
@@ -289,15 +323,15 @@ class rrt:
             self.fig.canvas.draw()
 
         # add the new node into node list
-        self.list2.append(new_node2)
+        self.end_tree .append(new_node2)
 
         # 检查是否两棵树已连通
         # 如果走一步就到了新node，就直接退出了
         if new_node2 == new_node:
             if flag == 2:
-                aa = self.list1.copy()
-                self.list1 = self.list2.copy()
-                self.list2 = aa.copy()
+                aa = self.start_tree .copy()
+                self.start_tree = self.end_tree .copy()
+                self.end_tree = aa.copy()
             return True
         else:
             while True:
@@ -306,14 +340,14 @@ class rrt:
                 # 生成 new_node3（介于 new_node2 和 new_node 之间的新节点）
                 if distance <= self.step_size:
                     # 如果 distance 小于 step_size，直接连上 new_node
-                    new_node3 = node(new_node.row, new_node.col, new_node2)
+                    new_node3 = Node(new_node.row, new_node.col, new_node2)
                 else:
                     # 否则，沿着 new_node2 → new_node 方向前进一步
                     add_row = (new_node.row - new_node2.row) * \
                         self.step_size / distance + new_node2.row
                     add_col = (new_node.col - new_node2.col) * \
                         self.step_size / distance + new_node2.col
-                    new_node3 = node(add_row, add_col, new_node2)
+                    new_node3 = Node(add_row, add_col, new_node2)
 
                 # check collision the second time: whether the path is in the collision!
                 if self.has_collision(new_node2, new_node3, flag):
@@ -332,13 +366,13 @@ class rrt:
                     self.fig.canvas.draw()
 
                 # add the new node into node list
-                self.list2.append(new_node3)
+                self.end_tree .append(new_node3)
                 # 结束标志，同上
                 if new_node3.row == new_node.row and new_node3.col == new_node.col:
                     if flag == 2:
-                        aa = self.list1.copy()
-                        self.list1 = self.list2.copy()
-                        self.list2 = aa.copy()
+                        aa = self.start_tree .copy()
+                        self.start_tree = self.end_tree .copy()
+                        self.end_tree = aa.copy()
                     return True
                 # 更换new_node2，进行迭代
                 new_node2 = new_node3
@@ -366,8 +400,8 @@ class rrt:
             #     return 0
             # consistently spring up new node until meet end requirement
             # spring the tree first which has less nodes
-            # 如果 list1（从起点生长的树）的节点数量 小于等于 list2（从终点生长的树），则扩展 list1。否则，扩展 list2。
-            if len(self.list1) <= len(self.list2):
+            # 如果 start_tree（从起点生长的树）的节点数量 小于等于 end_tree（从终点生长的树），则扩展 start_tree。否则，扩展 end_tree。
+            if len(self.start_tree) <= len(self.end_tree):
                 is_success = self.spring(1, flag)
             else:
                 is_success = self.spring(2, flag)
@@ -426,9 +460,9 @@ class rrt:
         t1 = None
         t2 = None
         path_all_length = np.inf
-        # list1和list2是两个tree
-        for temp1 in self.list1:
-            for temp2 in self.list2:
+        # start_tree和end_tree是两个tree
+        for temp1 in self.start_tree:
+            for temp2 in self.end_tree:
                 dis = np.inf
                 if (temp1.row - temp2.row) ** 2 + (temp1.col - temp2.col) ** 2 <= self.step_size ** 2:
                     # calculate the length of all path
@@ -438,15 +472,15 @@ class rrt:
                         if temp_node == self.start:
                             break
                         dis += np.sqrt(
-                            (temp_node.row - temp_node.father.row) ** 2 + (temp_node.col - temp_node.father.col) ** 2)
-                        temp_node = temp_node.father
+                            (temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
+                        temp_node = temp_node.parent
                     temp_node = temp2
                     while True:
                         if temp_node == self.end:
                             break
                         dis += np.sqrt(
-                            (temp_node.row - temp_node.father.row) ** 2 + (temp_node.col - temp_node.father.col) ** 2)
-                        temp_node = temp_node.father
+                            (temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
+                        temp_node = temp_node.parent
                     dis += np.sqrt((temp1.row - temp2.row) **
                                    2 + (temp1.col - temp2.col) ** 2)
                 if dis < path_all_length:
@@ -527,7 +561,7 @@ class rrt:
         res2 = []
         res2.append(temp)
         while temp != self.start:
-            temp = temp.father
+            temp = temp.parent
             res2.append(temp)
         # reverse the results
         res = []
@@ -540,7 +574,7 @@ class rrt:
         temp = temp_all[1]
         res.append(temp)
         while temp != self.end:
-            temp = temp.father
+            temp = temp.parent
             res.append(temp)
         # return the full path
         res = self.optim_path(res)
@@ -549,10 +583,10 @@ class rrt:
     # draw arcs to find the better path
     def update_path(self):
         # node list
-        self.list1 = []
-        self.list2 = []
-        self.list1.append(self.start)
-        self.list2.append(self.end)
+        self.start_tree = []
+        self.end_tree = []
+        self.start_tree .append(self.start)
+        self.end_tree .append(self.end)
         self.extend(flag=1)
 
     def print_path(self):
@@ -561,3 +595,17 @@ class rrt:
             for point in self.path:
                 print(point, end=",")
             print("]")
+
+
+if __name__ == "__main__":
+    start_time = "202411130728"
+    mark_time = "2024111307015"
+    speed = 6
+
+    rrt_agent = RRT(config["width"], config["height"],
+                    config["step_size"], config["end_lim"], None, None)
+    png_paths = get_images_path(start_time, mark_time)
+    rrt_agent.set_col_map(generate_combined_map(
+        png_paths, speed=speed, start_point=(100, 100), start_time=start_time))
+    plt.show()
+    plt.pause(10000)

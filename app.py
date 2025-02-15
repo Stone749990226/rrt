@@ -18,7 +18,7 @@ import logging
 from matplotlib import patches, pyplot as plt
 from fastapi.middleware.cors import CORSMiddleware
 from utils import check_path_collision, generate_combined_map, get_wh, haversine, lookup_table, pos2pix, get_images_path
-from rrt import node, rrt
+from rrt import Node, RRT
 
 from config import config
 # 全局变量
@@ -119,8 +119,8 @@ def calculate_response(data: RequestBody) -> ResponseBody:
         data.mark_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
     png_paths = get_images_path(start_time, mark_time)
 
-    rrt_agent = rrt(config["width"], config["height"], config["step_size"], config["end_lim"], node(
-        row_start, col_start), node(row_goal, col_goal))
+    rrt_agent = RRT(config["width"], config["height"], config["step_size"], config["end_lim"], Node(
+        row_start, col_start), Node(row_goal, col_goal))
     rrt_agent.set_col_map(generate_combined_map(
         png_paths, speed=speed, start_point=(row_start, col_start), start_time=start_time))
 
