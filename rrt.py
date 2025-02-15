@@ -1,4 +1,7 @@
+import bisect
+from datetime import timedelta
 import logging
+import math
 import time
 from matplotlib import patches, pyplot as plt
 from matplotlib.widgets import Button
@@ -10,7 +13,6 @@ with open('rrt_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 animation = config["animation"]
-np.random.seed(42)
 
 
 class node:
@@ -37,6 +39,7 @@ class node:
 
 class rrt:
     def __init__(self, width, height, step_size, end_lim, start: node, end: node, speed=6) -> None:
+        np.random.seed(42)
         self.t_iter_begin = time.time()
         # initial map & window
         self.height = height

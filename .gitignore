@@ -3,3 +3,4 @@ uvicorn.log
 server.log
 rrt_config.yaml
 *.png
+*.gif
