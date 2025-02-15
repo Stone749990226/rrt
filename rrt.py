@@ -157,9 +157,7 @@ class RRT:
             # 检查当前网格点是否碰撞
             if self.col_map[current_x][current_y] > 0:
                 if flag == 2:
-                    aa = self.start_tree .copy()
-                    self.start_tree = self.end_tree .copy()
-                    self.end_tree = aa.copy()
+                    self.start_tree, self.end_tree = self.end_tree, self.start_tree
                 return True
             if current_x == x1 and current_y == y1:
                 break
@@ -194,6 +192,20 @@ class RRT:
         min_step = self.step_size * self.adaptive_params['min_step_ratio']
         return self.step_size * (1 - density) + min_step * density
 
+    def sample_and_steer(self, flag, mk_dir_flag):
+        """采样新节点并生成路径"""
+        # 障碍物感知采样逻辑
+        if mk_dir_flag:
+            new_r, new_c = self.informed_sample()
+        else:
+            new_r, new_c = self.random_sample()
+
+        # 寻找最近节点
+        nearest_node = self.find_nearest_node(self.start_tree, new_r, new_c)
+
+        # 生成新节点
+        return self.steer(nearest_node, new_r, new_c)
+
     def spring(self, flag, mk_dir_flag=1):
         # 障碍物感知参数
         MAX_GOAL_BIAS = 0.7  # 最大目标偏置概率
@@ -218,9 +230,7 @@ class RRT:
 
         # 双向RRT，交替扩展
         if flag == 2:
-            aa = self.start_tree .copy()
-            self.start_tree = self.end_tree .copy()
-            self.end_tree = aa.copy()
+            self.start_tree, self.end_tree = self.end_tree, self.start_tree
         # "Near". find rule:only the distance
         # 遍历 start_tree 中所有节点，找到 欧几里得距离最近的节点 temp_node
         min_node = float('inf')
@@ -329,9 +339,7 @@ class RRT:
         # 如果走一步就到了新node，就直接退出了
         if new_node2 == new_node:
             if flag == 2:
-                aa = self.start_tree .copy()
-                self.start_tree = self.end_tree .copy()
-                self.end_tree = aa.copy()
+                self.start_tree, self.end_tree = self.end_tree, self.start_tree
             return True
         else:
             while True:
@@ -370,9 +378,7 @@ class RRT:
                 # 结束标志，同上
                 if new_node3.row == new_node.row and new_node3.col == new_node.col:
                     if flag == 2:
-                        aa = self.start_tree .copy()
-                        self.start_tree = self.end_tree .copy()
-                        self.end_tree = aa.copy()
+                        self.start_tree, self.end_tree = self.end_tree, self.start_tree
                     return True
                 # 更换new_node2，进行迭代
                 new_node2 = new_node3
@@ -536,22 +542,25 @@ class RRT:
 
         return self.path_final
 
-    # optimal path
     def optim_path(self, path):
-        if len(path) > 3:
-            t = 0
-            while True:
-                # 尝试跳过 path[t+1]，直接连接 temp1 和 temp3，如果这条直线可行，就可以删掉 path[t+1]，从而缩短路径
-                temp1 = path[t]
-                temp3 = path[t+2]
-                # check collision the second time: whether the path is in the collision!
-                if self.has_collision(temp1, temp3, 0) is False:
-                    path.pop(t+1)
-                else:
-                    t += 1
-                if temp3 == path[-1]:
+        """路径后处理算法"""
+        if len(path) < 3:
+            return path
+
+        optimized = [path[0]]  # 始终保留起点
+        current_index = 0
+
+        while current_index < len(path)-1:
+            # 尝试连接尽可能远的节点
+            farthest_safe = current_index + 1  # 至少保留下一个节点
+            for check_index in range(len(path)-1, current_index, -1):
+                if not self.has_collision(path[current_index], path[check_index], 0):
+                    farthest_safe = check_index
                     break
-        return path
+            optimized.append(path[farthest_safe])
+            current_index = farthest_safe
+
+        return optimized
 
     # when make it, go back to find the relavently low cost path
     # 从 end_limitation 选出的两个连接点出发，回溯出一条完整的路径，并进行优化
