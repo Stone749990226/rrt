@@ -206,6 +206,45 @@ class RRT:
         # 生成新节点
         return self.steer(nearest_node, new_r, new_c)
 
+    def informed_sample(self, cMax, cMin):
+        if cMax == float('inf'):
+            # 如果尚未找到路径，退化为全图随机采样
+            new_r = np.random.uniform(0, self.height)
+            new_c = np.random.uniform(0, self.width)
+            return new_r, new_c
+
+        # 椭圆参数计算
+        a = cMax / 2.0
+        b = math.sqrt(cMax**2 - cMin**2) / 2.0
+
+        # 椭圆中心（中点）
+        center_r = (self.start.row + self.end.row) / 2.0
+        center_c = (self.start.col + self.end.col) / 2.0
+
+        # 计算旋转角度（从起点指向终点的方向）
+        dx = self.end.row - self.start.row
+        dy = self.end.col - self.start.col
+        theta = math.atan2(dy, dx)
+
+        # 在单位圆内生成均匀分布的随机点
+        r = math.sqrt(np.random.random())  # sqrt确保均匀分布
+        angle = 2 * math.pi * np.random.random()
+        x = r * math.cos(angle)
+        y = r * math.sin(angle)
+
+        # 应用椭圆变换（旋转+缩放+平移）
+        x_rot = x * a * math.cos(theta) - y * b * math.sin(theta)
+        y_rot = x * a * math.sin(theta) + y * b * math.cos(theta)
+
+        new_r = x_rot + center_r
+        new_c = y_rot + center_c
+
+        # 限制坐标在地图范围内
+        new_r = np.clip(new_r, 0, self.height-1)
+        new_c = np.clip(new_c, 0, self.width-1)
+
+        return new_r, new_c
+
     def spring(self, flag, mk_dir_flag=1):
         # 障碍物感知参数
         MAX_GOAL_BIAS = 0.7  # 最大目标偏置概率
@@ -214,16 +253,16 @@ class RRT:
 
         new_r = int(self.height * np.random.rand())
         new_c = int(self.width * np.random.rand())
-        bias = 2
-        # mk_dir_flag 控制是否进行受限区域采样（即是否要在 Informed RRT* 的椭圆范围内采样）TODO: 优化
+        # mk_dir_flag 控制是否进行受限区域采样（Informed RRT* 椭圆采样）
         if mk_dir_flag:
-            bias = 2
-            while True:
-                new_r = int(self.height * np.random.rand())
-                new_c = int(self.width * np.random.rand())
-                if np.sqrt((new_r - self.start.row)**2 + (new_c - self.start.col)**2) + \
-                   np.sqrt((new_r - self.end.row)**2 + (new_c - self.end.col)**2) <= self.path_length + bias:
-                    break
+            # 计算起点到终点的直线距离作为cMin
+            cMin = math.sqrt((self.start.row - self.end.row) **
+                             2 + (self.start.col - self.end.col)**2)
+            # 使用椭圆采样
+            new_r, new_c = self.informed_sample(self.less_long_path, cMin)
+            # 转换为整数坐标（适配栅格地图）
+            new_r = int(round(new_r))
+            new_c = int(round(new_c))
         else:
             new_r = int(self.height * np.random.rand())
             new_c = int(self.width * np.random.rand())
@@ -286,11 +325,11 @@ class RRT:
             # 创建直线
             self.ax.plot([new_node.col, temp_node.col], [
                 new_node.row, temp_node.row], color='gray', linewidth=1)
-            self.fig.canvas.draw()
+            self.fig.canvas.draw_idle()
             plt.pause(0.01)
 
         # add the new node into node list
-        self.start_tree .append(new_node)
+        self.start_tree.append(new_node)
 
         # the tree birthed from the end node;
         # 在第一颗树和新节点作用完成后，去考虑另一个树，从原来的树开始一直往new node连接，一直到撞到障碍物或者连接到new node（搜索结束）
@@ -594,8 +633,8 @@ class RRT:
         # node list
         self.start_tree = []
         self.end_tree = []
-        self.start_tree .append(self.start)
-        self.end_tree .append(self.end)
+        self.start_tree.append(self.start)
+        self.end_tree.append(self.end)
         self.extend(flag=1)
 
     def print_path(self):
