@@ -140,7 +140,7 @@ class RRT:
             self.fig.canvas.draw()
             plt.pause(0.1)  # 暂停0.1秒
 
-    def has_collision(self, node1: Node, node2: Node, flag: int) -> bool:
+    def has_collision(self, node1: Node, node2: Node, tree_index: int) -> bool:
         # 使用 Bresenham 算法生成路径上的所有网格点，检查是否有障碍物
         x0, y0 = int(node1.row), int(node1.col)
         x1, y1 = int(node2.row), int(node2.col)
@@ -156,7 +156,7 @@ class RRT:
         while True:
             # 检查当前网格点是否碰撞
             if self.col_map[current_x][current_y] > 0:
-                if flag == 2:
+                if tree_index == 2:
                     self.start_tree, self.end_tree = self.end_tree, self.start_tree
                 return True
             if current_x == x1 and current_y == y1:
@@ -245,59 +245,39 @@ class RRT:
 
         return new_r, new_c
 
-    def spring(self, flag, mk_dir_flag=1):
-        # 障碍物感知参数
-        MAX_GOAL_BIAS = 0.7  # 最大目标偏置概率
-        MIN_GOAL_BIAS = 0.1  # 最小目标偏置概率
-        DENSITY_THRESHOLD = 0.3  # 密度阈值
+    def find_nearest(tree, target_r, target_c):
+        # 使用 min 函数返回元组 (最小的节点, key的计算结果)
+        nearest_node = min(tree, key=lambda node: (
+            node.row - target_r)**2 + (node.col - target_c)**2)
 
-        new_r = int(self.height * np.random.rand())
-        new_c = int(self.width * np.random.rand())
-        # mk_dir_flag 控制是否进行受限区域采样（Informed RRT* 椭圆采样）
-        if mk_dir_flag:
-            # 计算起点到终点的直线距离作为cMin
-            cMin = math.sqrt((self.start.row - self.end.row) **
-                             2 + (self.start.col - self.end.col)**2)
-            # 使用椭圆采样
-            new_r, new_c = self.informed_sample(self.less_long_path, cMin)
-            # 转换为整数坐标（适配栅格地图）
-            new_r = int(round(new_r))
-            new_c = int(round(new_c))
-        else:
-            new_r = int(self.height * np.random.rand())
-            new_c = int(self.width * np.random.rand())
+        # 获取 key 的计算结果
+        key_value = (nearest_node.row - target_r)**2 + \
+            (nearest_node.col - target_c)**2
 
-        # 双向RRT，交替扩展
-        if flag == 2:
-            self.start_tree, self.end_tree = self.end_tree, self.start_tree
+        return nearest_node, key_value
+
+    def steer(self, tree, new_r, new_c, tree_index):
         # "Near". find rule:only the distance
         # 遍历 start_tree 中所有节点，找到 欧几里得距离最近的节点 temp_node
-        min_node = float('inf')
-        temp_node = Node()
-        for i in range(len(self.start_tree)):
-            temp = self.start_tree[i]
-            dis_r = temp.row - new_r
-            dis_c = temp.col - new_c
-            distance = dis_r ** 2 + dis_c ** 2
 
-            if distance < min_node**2 and distance > 0:
-                temp_node = temp
-                min_node = distance
+        nearest_node = min(tree, key=lambda node: (
+            node.row - new_r)**2 + (node.col - new_c)**2)
 
         # "Steer" and "Edge". link nodes
-        distance = np.sqrt(min_node)
+        distance = np.sqrt((nearest_node.row - new_r)**2 +
+                           (nearest_node.col - new_c)**2)
 
         if distance <= self.step_size:
             # 如果最近的节点与新节点的距离 小于步长，直接创建 new_node 连接 temp_node
-            new_node = Node(new_r, new_c, temp_node)
+            new_node = Node(new_r, new_c, nearest_node)
 
         else:
             # 如果 大于步长，则沿着 temp_node → (new_r, new_c) 方向移动 step_size 进行扩展，创建 new_node
-            add_row = (new_r - temp_node.row) * \
-                self.step_size / distance + temp_node.row
-            add_col = (new_c - temp_node.col) * \
-                self.step_size / distance + temp_node.col
-            new_node = Node(add_row, add_col, temp_node)
+            add_row = (new_r - nearest_node.row) * \
+                self.step_size / distance + nearest_node.row
+            add_col = (new_c - nearest_node.col) * \
+                self.step_size / distance + nearest_node.col
+            new_node = Node(add_row, add_col, nearest_node)
 
         # rewire
         '''
@@ -313,71 +293,75 @@ class RRT:
         '''
 
         # check collision the second time: whether the path is in the collision!
-        if self.has_collision(temp_node, new_node, flag):
-            return False
+        if self.has_collision(nearest_node, new_node, tree_index):
+            return None
 
         if animation:
+            if tree_index == 1:
+                color = 'gray'
+            elif tree_index == 2:
+                color = 'lightblue'
             rect = patches.Rectangle(
                 (new_node.col - 2, new_node.row - 2), 4, 4,  # (x, y), 宽度, 高度
                 linewidth=1, edgecolor='green', facecolor='green'
             )
             self.ax.add_patch(rect)
             # 创建直线
-            self.ax.plot([new_node.col, temp_node.col], [
-                new_node.row, temp_node.row], color='gray', linewidth=1)
+            self.ax.plot([new_node.col, nearest_node.col], [
+                new_node.row, nearest_node.row], color=color, linewidth=1)
             self.fig.canvas.draw_idle()
             plt.pause(0.01)
+
+        return new_node
+
+    def spring(self, tree_index, informed_sample_flag=1):
+        # 障碍物感知参数
+        MAX_GOAL_BIAS = 0.7  # 最大目标偏置概率
+        MIN_GOAL_BIAS = 0.1  # 最小目标偏置概率
+        DENSITY_THRESHOLD = 0.3  # 密度阈值
+
+        new_r = int(self.height * np.random.rand())
+        new_c = int(self.width * np.random.rand())
+        # mk_dir_flag 控制是否进行受限区域采样（Informed RRT* 椭圆采样）
+        if informed_sample_flag:
+            # 计算起点到终点的直线距离作为cMin
+            cMin = math.sqrt((self.start.row - self.end.row) **
+                             2 + (self.start.col - self.end.col)**2)
+            # 使用椭圆采样
+            new_r, new_c = self.informed_sample(self.less_long_path, cMin)
+            # 转换为整数坐标（适配栅格地图）
+            new_r = int(round(new_r))
+            new_c = int(round(new_c))
+        else:
+            new_r = int(self.height * np.random.rand())
+            new_c = int(self.width * np.random.rand())
+
+        # 双向RRT，交替扩展
+        if tree_index == 2:
+            self.start_tree, self.end_tree = self.end_tree, self.start_tree
+
+        new_node = self.steer(self.start_tree, new_r, new_c, tree_index)
+
+        if new_node is None:
+            return False
 
         # add the new node into node list
         self.start_tree.append(new_node)
 
         # the tree birthed from the end node;
         # 在第一颗树和新节点作用完成后，去考虑另一个树，从原来的树开始一直往new node连接，一直到撞到障碍物或者连接到new node（搜索结束）
-        min_node = float('inf')
-        temp_node = Node()
-        for i in range(len(self.end_tree)):
-            temp = self.end_tree[i]
-            dis_r = temp.row - new_node.row
-            dis_c = temp.col - new_node.col
-            distance = dis_r ** 2 + dis_c ** 2
+        new_node2 = self.steer(self.end_tree, new_r, new_c, tree_index)
 
-            if distance < min_node and distance > 0:
-                temp_node = temp
-                min_node = distance
-
-        # "Steer" and "Edge". link nodes
-        distance = np.sqrt(min_node)
-        if distance <= self.step_size:
-            new_node2 = Node(new_node.row, new_node.col, temp_node)
-        else:
-            add_row = (new_r - temp_node.row) * \
-                self.step_size / distance + temp_node.row
-            add_col = (new_c - temp_node.col) * \
-                self.step_size / distance + temp_node.col
-            new_node2 = Node(add_row, add_col, temp_node)
-
-        # check collision: whether the path is in the collision!
-        if self.has_collision(temp_node, new_node2, flag):
+        if new_node2 is None:
             return False
 
-        if animation:
-            rect = patches.Rectangle(
-                (new_node.col - 2, new_node.row - 2), 4, 4,  # (x, y), 宽度, 高度
-                linewidth=1, edgecolor='green', facecolor='green'
-            )
-            self.ax.add_patch(rect)
-            # 创建直线
-            self.ax.plot([new_node2.col, temp_node.col], [
-                new_node2.row, temp_node.row], color='lightblue', linewidth=1)
-            self.fig.canvas.draw()
-
         # add the new node into node list
-        self.end_tree .append(new_node2)
+        self.end_tree.append(new_node2)
 
         # 检查是否两棵树已连通
         # 如果走一步就到了新node，就直接退出了
         if new_node2 == new_node:
-            if flag == 2:
+            if tree_index == 2:
                 self.start_tree, self.end_tree = self.end_tree, self.start_tree
             return True
         else:
@@ -397,7 +381,7 @@ class RRT:
                     new_node3 = Node(add_row, add_col, new_node2)
 
                 # check collision the second time: whether the path is in the collision!
-                if self.has_collision(new_node2, new_node3, flag):
+                if self.has_collision(new_node2, new_node3, tree_index):
                     return False
 
                 if animation:
@@ -413,17 +397,17 @@ class RRT:
                     self.fig.canvas.draw()
 
                 # add the new node into node list
-                self.end_tree .append(new_node3)
+                self.end_tree.append(new_node3)
                 # 结束标志，同上
                 if new_node3.row == new_node.row and new_node3.col == new_node.col:
-                    if flag == 2:
+                    if tree_index == 2:
                         self.start_tree, self.end_tree = self.end_tree, self.start_tree
                     return True
                 # 更换new_node2，进行迭代
                 new_node2 = new_node3
 
     # expend nodes, flag is to figure whether to limit the new springed node's position
-    def extend(self, flag=0):
+    def extend(self, informed_sample_flag=0):
         # 如果extend的时间较大，大概率是因为此路径无法再优化了（椭圆内障碍物太多），这时直接退出就可以了;
         # 如果前后两次路径的差值小于1，则已收敛了
         self.is_success = True
@@ -447,9 +431,9 @@ class RRT:
             # spring the tree first which has less nodes
             # 如果 start_tree（从起点生长的树）的节点数量 小于等于 end_tree（从终点生长的树），则扩展 start_tree。否则，扩展 end_tree。
             if len(self.start_tree) <= len(self.end_tree):
-                is_success = self.spring(1, flag)
+                is_success = self.spring(1, informed_sample_flag)
             else:
-                is_success = self.spring(2, flag)
+                is_success = self.spring(2, informed_sample_flag)
             if is_success:
                 temp = self.end_limitation()
                 if temp != False:
@@ -635,7 +619,7 @@ class RRT:
         self.end_tree = []
         self.start_tree.append(self.start)
         self.end_tree.append(self.end)
-        self.extend(flag=1)
+        self.extend(informed_sample_flag=1)
 
     def print_path(self):
         if self.path is not None:
