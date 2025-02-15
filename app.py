@@ -17,7 +17,7 @@ from scipy.spatial.transform import Rotation as Rot
 import logging
 from matplotlib import patches, pyplot as plt
 from fastapi.middleware.cors import CORSMiddleware
-from utils import generate_combined_map, get_wh, haversine, lookup_table, pos2pix, get_images_path
+from utils import check_path_collision, generate_combined_map, get_wh, haversine, lookup_table, pos2pix, get_images_path
 from rrt import node, rrt
 
 from config import config
@@ -139,6 +139,10 @@ def calculate_response(data: RequestBody) -> ResponseBody:
         logging.error("start or end point is in obstacle")
         return ResponseBody(route=route, summary=summary)
     path = rrt_agent.search_path()
+    if animation:
+        print(path)
+        check_path_collision(path=path, speed=speed,
+                             start_time=start_time, animation_flag=animation)
     # profiler.disable()  # 停止性能分析
     # profiler.print_stats(sort="time")  # 输出性能分析结果
 
@@ -190,16 +194,16 @@ async def calculate_route(request: RequestBody):
 if __name__ == "__main__":
     request_data = {
         "start": {
-            "lat": 18.187606552494625,
-            "lon": 117.02636718750001
+            "lat": 17.476432197195518,
+            "lon": 114.87304687500001
         },
         "end": {
-            "lat": 11.781325296112277,
-            "lon": 134.38476562500003
+            "lat": 12.897489183755892,
+            "lon": 133.37402343750003
         },
-        "start_time": "2024-11-13 07:15",
-        "mark_time": "2024-11-13 07:00",
-        "speed": 500,
+        "start_time": "2024-11-13 07:30",
+        "mark_time": "2024-11-13 07:30",
+        "speed": 700,
         "time_step": 15,
         "threshold": 0,
         "structure_size": 5
