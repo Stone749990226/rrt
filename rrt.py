@@ -140,7 +140,7 @@ class RRT:
             self.fig.canvas.draw()
             plt.pause(0.1)  # 暂停0.1秒
 
-    def has_collision(self, node1: Node, node2: Node, tree_index: int) -> bool:
+    def has_collision(self, node1: Node, node2: Node) -> bool:
         # 使用 Bresenham 算法生成路径上的所有网格点，检查是否有障碍物
         x0, y0 = int(node1.row), int(node1.col)
         x1, y1 = int(node2.row), int(node2.col)
@@ -156,8 +156,6 @@ class RRT:
         while True:
             # 检查当前网格点是否碰撞
             if self.col_map[current_x][current_y] > 0:
-                if tree_index == 2:
-                    self.start_tree, self.end_tree = self.end_tree, self.start_tree
                 return True
             if current_x == x1 and current_y == y1:
                 break
@@ -256,7 +254,7 @@ class RRT:
 
         return nearest_node, key_value
 
-    def steer(self, tree, new_r, new_c, tree_index):
+    def steer(self, tree: list[Node], new_r, new_c, tree_index):
         # "Near". find rule:only the distance
         # 遍历 start_tree 中所有节点，找到 欧几里得距离最近的节点 temp_node
 
@@ -280,20 +278,20 @@ class RRT:
             new_node = Node(add_row, add_col, nearest_node)
 
         # rewire
-        '''
-        for temp in self.start_tree:
-            distance = np.sqrt((new_node.col-temp.col)**2 +
-                               (new_node.row-temp.row)**2)
-            if distance < int(self.step_size):
-                if temp == new_node.parent or temp == self.start or temp == self.end:
-                    continue
-                if distance+new_node.distance < temp.distance:
-                    temp.parent = new_node
-                    temp.distance = distance+new_node.distance
-        '''
+        if config["rewire"]:
+            for node in tree:
+                distance = np.sqrt((new_node.col-node.col)**2 +
+                                   (new_node.row-node.row)**2)
+                if distance < int(self.step_size):
+                    if node == new_node.parent or node == self.start or node == self.end:
+                        continue
+                    if distance+new_node.distance < node.distance:
+                        node.parent = new_node
+                        node.distance = distance+new_node.distance
 
-        # check collision the second time: whether the path is in the collision!
-        if self.has_collision(nearest_node, new_node, tree_index):
+        if self.has_collision(nearest_node, new_node):
+            if tree_index == 2:
+                self.start_tree, self.end_tree = self.end_tree, self.start_tree
             return None
 
         if animation:
@@ -381,7 +379,9 @@ class RRT:
                     new_node3 = Node(add_row, add_col, new_node2)
 
                 # check collision the second time: whether the path is in the collision!
-                if self.has_collision(new_node2, new_node3, tree_index):
+                if self.has_collision(new_node2, new_node3):
+                    if tree_index == 2:
+                        self.start_tree, self.end_tree = self.end_tree, self.start_tree
                     return False
 
                 if animation:
@@ -520,9 +520,9 @@ class RRT:
         return t1, t2
 
     def search_path(self, iternation=100, max_search_time=10):
-        if self.has_collision(self.start, self.end, 0) is False:
+        if self.has_collision(self.start, self.end) is False:
             logging.info("起点和终点的连线没有障碍物，可以直接通行")
-            self.path = [[self.start, self.end]]
+            self.path = [self.start, self.end]
             self.path_all = [[self.start, self.end]]
             if animation:
                 self.draw_path()
@@ -577,7 +577,7 @@ class RRT:
             # 尝试连接尽可能远的节点
             farthest_safe = current_index + 1  # 至少保留下一个节点
             for check_index in range(len(path)-1, current_index, -1):
-                if not self.has_collision(path[current_index], path[check_index], 0):
+                if not self.has_collision(path[current_index], path[check_index]):
                     farthest_safe = check_index
                     break
             optimized.append(path[farthest_safe])
