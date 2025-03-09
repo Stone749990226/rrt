@@ -1,18 +1,8 @@
-import copy
-import random
-import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timedelta
-import cProfile
-import requests
-import cv2
-from io import BytesIO
-import scipy
 import pytz
-import os
-import math
 from scipy.spatial.transform import Rotation as Rot
 import logging
 from matplotlib import patches, pyplot as plt
@@ -25,9 +15,6 @@ from config import config
 
 animation = config["animation"]
 maps = {}
-speed = 6  # 每分钟能走多少像素格子
-map_interval = 15  # 地图切换间隔为15分钟
-threshold_distance = speed * map_interval
 
 start_time = None
 mark_time = None
@@ -186,7 +173,7 @@ def calculate_response(data: RequestBody) -> ResponseBody:
 
 
 # 定义 POST 路由
-@app.post("/api/route", response_model=ResponseBody)
+@app.post("/routing/route", response_model=ResponseBody)
 async def calculate_route(request: RequestBody):
     response = calculate_response(request)
     return response

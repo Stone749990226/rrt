@@ -1,4 +1,3 @@
-import bisect
 from datetime import timedelta
 import logging
 import math
@@ -207,43 +206,44 @@ class RRT:
         return self.steer(nearest_node, new_r, new_c)
 
     def informed_sample(self, cMax, cMin):
-        if cMax == float('inf'):
+        # if cMax == float('inf'):
+        if True:
             # 如果尚未找到路径，退化为全图随机采样
             new_r = np.random.uniform(0, self.height)
             new_c = np.random.uniform(0, self.width)
             return new_r, new_c
 
         # 椭圆参数计算
-        a = cMax / 2.0
-        b = math.sqrt(cMax**2 - cMin**2) / 2.0
+        # a = cMax / 2.0
+        # b = math.sqrt(cMax**2 - cMin**2) / 2.0
 
-        # 椭圆中心（中点）
-        center_r = (self.start.row + self.end.row) / 2.0
-        center_c = (self.start.col + self.end.col) / 2.0
+        # # 椭圆中心（中点）
+        # center_r = (self.start.row + self.end.row) / 2.0
+        # center_c = (self.start.col + self.end.col) / 2.0
 
-        # 计算旋转角度（从起点指向终点的方向）
-        dx = self.end.row - self.start.row
-        dy = self.end.col - self.start.col
-        theta = math.atan2(dy, dx)
+        # # 计算旋转角度（从起点指向终点的方向）
+        # dx = self.end.row - self.start.row
+        # dy = self.end.col - self.start.col
+        # theta = math.atan2(dy, dx)
 
-        # 在单位圆内生成均匀分布的随机点
-        r = math.sqrt(np.random.random())  # sqrt确保均匀分布
-        angle = 2 * math.pi * np.random.random()
-        x = r * math.cos(angle)
-        y = r * math.sin(angle)
+        # # 在单位圆内生成均匀分布的随机点
+        # r = math.sqrt(np.random.random())  # sqrt确保均匀分布
+        # angle = 2 * math.pi * np.random.random()
+        # x = r * math.cos(angle)
+        # y = r * math.sin(angle)
 
-        # 应用椭圆变换（旋转+缩放+平移）
-        x_rot = x * a * math.cos(theta) - y * b * math.sin(theta)
-        y_rot = x * a * math.sin(theta) + y * b * math.cos(theta)
+        # # 应用椭圆变换（旋转+缩放+平移）
+        # x_rot = x * a * math.cos(theta) - y * b * math.sin(theta)
+        # y_rot = x * a * math.sin(theta) + y * b * math.cos(theta)
 
-        new_r = x_rot + center_r
-        new_c = y_rot + center_c
+        # new_r = x_rot + center_r
+        # new_c = y_rot + center_c
 
-        # 限制坐标在地图范围内
-        new_r = np.clip(new_r, 0, self.height-1)
-        new_c = np.clip(new_c, 0, self.width-1)
+        # # 限制坐标在地图范围内
+        # new_r = np.clip(new_r, 0, self.height-1)
+        # new_c = np.clip(new_c, 0, self.width-1)
 
-        return new_r, new_c
+        # return new_r, new_c
 
     def find_nearest(tree, target_r, target_c):
         # 使用 min 函数返回元组 (最小的节点, key的计算结果)

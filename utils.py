@@ -17,9 +17,10 @@ from matplotlib.widgets import Button
 from scipy.ndimage import binary_dilation
 import re
 
-from config import config
+from config import config, path_prefix
+
 maps = {}
-lookup_table = np.load('cloud_latlon_lookup_table_average.npy')
+lookup_table = np.load('cloud_look_up_table_v2.npy')
 
 
 def align_time_15m(time_str: str):
@@ -29,7 +30,7 @@ def align_time_15m(time_str: str):
     return aligned_time.strftime("%Y%m%d%H%M")
 
 
-def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
+def get_images_path(start_time, mark_time, prefix=path_prefix):
     """/data/ImageData/20241206/11/cloud_dugs_unet_3h/16-45"""
     res = []
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
@@ -71,7 +72,7 @@ def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
     return res
 
 
-def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold=0, safety_radius=5):
+def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold=0, safety_radius=10):
     """speed: 每分钟移动的像素格子数"""
     global maps
 
@@ -106,10 +107,6 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         # 二值化（注意：根据实际图像情况可能需要调整阈值）
         bin_map = (gray_array > threshold).astype(np.uint8)
 
-        # 形态学膨胀，增加障碍物的安全边界
-        bin_map = binary_dilation(bin_map, structure=np.ones(
-            (safety_radius, safety_radius))).astype(np.uint8)
-
         # 构造 annulus 区域的布尔掩码（矢量化）
         annulus_mask = (distance_map >= min_radius)
 
@@ -117,6 +114,17 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         # 同时更新综合地图（逻辑或操作，相当于合并所有时间步的障碍物）
         combined_map[(bin_map == 1) & annulus_mask] = 1
 
+    def cross_structure(radius):
+        size = 2 * radius + 1
+        structure = np.zeros((size, size), dtype=bool)
+        center = radius
+        structure[center, :] = True  # 水平线
+        structure[:, center] = True  # 垂直线
+        return structure
+
+    # 形态学膨胀，增加障碍物的安全边界
+    combined_map = binary_dilation(
+        combined_map, structure=cross_structure(safety_radius)).astype(np.uint8)
     return combined_map
 
 
