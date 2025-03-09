@@ -17,7 +17,8 @@ from matplotlib.widgets import Button
 from scipy.ndimage import binary_dilation
 import re
 
-from config import config
+from config import config, path_prefix
+
 maps = {}
 lookup_table = np.load('cloud_look_up_table_v2.npy')
 
@@ -51,7 +52,7 @@ def align_time_15m(time_str: str):
     return aligned_time.strftime("%Y%m%d%H%M")
 
 
-def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
+def get_images_path(start_time, mark_time, prefix=path_prefix):
     """/data/ImageData/20241206/11/cloud_dugs_unet_3h/16-45"""
     res = []
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")

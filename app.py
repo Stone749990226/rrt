@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timedelta
-from io import BytesIO
 import pytz
 from scipy.spatial.transform import Rotation as Rot
 import logging

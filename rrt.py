@@ -178,7 +178,6 @@ class RRT:
 
         # 椭圆参数计算
         a = cMax / 2.0
-
         b = math.sqrt(cMax**2 - cMin**2) / 2.0
 
         # 椭圆中心（中点）
@@ -738,11 +737,11 @@ def test_rrt_with_config(n=20, configs=None):
 if __name__ == "__main__":
     # test_rrt_with_config(30)
     start_time = "202411130728"
-    mark_time = "2024111307015"
+    mark_time = "202411130715"
 
     speed = 4
     use_config = {
-        "use_heuristic": True,
+        "use_heuristic": False,
         "use_bidirectional": True,
         "use_adaptive_step": False,
         "collision_method": "bresenham"
@@ -756,11 +755,11 @@ if __name__ == "__main__":
     # profiler = cProfile.Profile()
     # profiler.enable()  # 开始性能分析
     rrt_agent.search_path()
-    plt.show()
+    # plt.show()
     # profiler.disable()
     # profiler.print_stats(sort="time")  # 输出性能分析结果
     # plt.pause(100)
     path = rrt_agent.path_final
-    # print(path)
-    check_path_collision(path=path, speed=speed,
-                         start_time=start_time, animation_flag=animation)
+    print(path)
+    # check_path_collision(path=path, speed=speed,
+    #                      start_time=start_time, animation_flag=animation)
