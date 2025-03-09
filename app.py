@@ -23,7 +23,7 @@ mark_time = None
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
-fh = logging.FileHandler(filename='./server.log')
+fh = logging.FileHandler(filename='/logs/server.log')
 formatter = logging.Formatter(
     "%(asctime)s - %(module)s - %(funcName)s - line:%(lineno)d - %(levelname)s - %(message)s"
 )

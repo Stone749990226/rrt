@@ -18,5 +18,7 @@ COPY . .
 ENV APP_PORT=8123
 EXPOSE ${APP_PORT}
 
+RUN mkdir -p /logs
+
 # 启动命令（JSON 格式，避免信号问题）
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "${APP_PORT}", "--log-level", "info"]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${APP_PORT} --log-level info > /logs/uvicorn.log 2>&1"]
