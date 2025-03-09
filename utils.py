@@ -19,7 +19,29 @@ import re
 
 from config import config
 maps = {}
-lookup_table = np.load('cloud_latlon_lookup_table_average.npy')
+lookup_table = np.load('cloud_look_up_table_v2.npy')
+
+
+class Node:
+    """each node has varieties:row,col,parent"""
+
+    def __init__(self, r=0, c=0, f=None):
+        self.row = r
+        self.col = c
+        self.parent = f
+        self.distance = 0
+        parent = self.parent
+        # 如果路径发生了变动时（例如，节点可能会被修改或重连），循环计算distance才比较准确。
+        while True:
+            if parent == None:
+                break
+            self.distance += np.sqrt((r-parent.row)**2+(c-parent.col)**2)
+            r = parent.row
+            c = parent.col
+            parent = parent.parent
+
+    def __str__(self):
+        return f"({self.row}, {self.col})"
 
 
 def align_time_15m(time_str: str):
@@ -71,7 +93,7 @@ def get_images_path(start_time, mark_time, prefix="/data/ImageData/"):
     return res
 
 
-def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold=0, safety_radius=5):
+def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold=0, safety_radius=20):
     """speed: 每分钟移动的像素格子数"""
     global maps
 
@@ -106,10 +128,6 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         # 二值化（注意：根据实际图像情况可能需要调整阈值）
         bin_map = (gray_array > threshold).astype(np.uint8)
 
-        # 形态学膨胀，增加障碍物的安全边界
-        bin_map = binary_dilation(bin_map, structure=np.ones(
-            (safety_radius, safety_radius))).astype(np.uint8)
-
         # 构造 annulus 区域的布尔掩码（矢量化）
         annulus_mask = (distance_map >= min_radius)
 
@@ -117,6 +135,16 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         # 同时更新综合地图（逻辑或操作，相当于合并所有时间步的障碍物）
         combined_map[(bin_map == 1) & annulus_mask] = 1
 
+    def cross_structure(radius):
+        size = 2 * radius + 1
+        structure = np.zeros((size, size), dtype=bool)
+        center = radius
+        structure[center, :] = True  # 水平线
+        structure[:, center] = True  # 垂直线
+        return structure
+    # 形态学膨胀，增加障碍物的安全边界
+    combined_map = binary_dilation(
+        combined_map, structure=cross_structure(safety_radius)).astype(np.uint8)
     return combined_map
 
 
@@ -143,6 +171,71 @@ def insert_intermediate_points(path, threshold_distance):
         new_path.append(p2)
 
     return new_path
+
+
+def has_collision(col_map, node1: Node, node2: Node, method='bresenham') -> bool:
+    """带方法选择的碰撞检测函数
+    Parameters:
+        method: 'bresenham' - 使用Bresenham算法（默认）
+                'discrete'  - 使用离散点采样法
+    """
+    x0, y0 = int(node1.row), int(node1.col)
+    x1, y1 = int(node2.row), int(node2.col)
+
+    # 公共预处理：检查起点终点自身是否在障碍物
+    if col_map[x0][y0] > 0 or col_map[x1][y1] > 0:
+        return True
+
+    if method == 'bresenham':
+        # Bresenham算法实现
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        current_x, current_y = x0, y0
+        while True:
+            if col_map[current_x][current_y] > 0:
+                return True
+            if current_x == x1 and current_y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                current_x += sx
+            if e2 < dx:
+                err += dx
+                current_y += sy
+        return False
+
+    elif method == 'discrete':
+        # 离散点采样法实现
+        dx = x1 - x0
+        dy = y1 - y0
+        distance = math.hypot(dx, dy)
+
+        if distance == 0:
+            return False
+
+        # 动态计算采样步长（至少1像素）
+        step_size = max(1, int(distance / 1000))
+        steps = int(distance / step_size) + 1
+
+        for i in range(steps + 1):
+            ratio = i / steps
+            x = x0 + dx * ratio
+            y = y0 + dy * ratio
+            # 四舍五入取整并确保在边界内
+            xi = min(max(round(x), 0), col_map.shape[0]-1)
+            yi = min(max(round(y), 0), col_map.shape[1]-1)
+            if col_map[xi][yi] > 0:
+                return True
+        return False
+
+    else:
+        raise ValueError(
+            "Invalid collision check method. Choose 'bresenham' or 'discrete'")
 
 
 def get_wh(image_path: str):
@@ -413,15 +506,20 @@ if __name__ == "__main__":
     #     image_files, 6, (600, 600), start_time)
     # plt.imshow(combined_map, cmap='gray')
     # plt.savefig("temp.png")
-    start_time = "202411130728"
-    mark_time = "2024111307015"
-    speed = 6
-    generate_combined_map(
-        get_images_path(start_time, mark_time), speed=speed, start_point=(100, 100), start_time=start_time)
-    path = [(784, 1203), (824.5941418531968, 1398.0988815480077),
-            (822.041420065192, 1495.4286774299896), (857, 1596), (886, 1722),]
-    speed = 10
-    start_time = datetime.strptime(start_time, "%Y%m%d%H%M")
-    result = check_path_collision(
-        path, speed, start_time, maps, animation_flag=True)
-    print("Path safe:", result)
+    # start_time = "202411130728"
+    # mark_time = "2024111307015"
+    # speed = 6
+    # generate_combined_map(
+    #     get_images_path(start_time, mark_time), speed=speed, start_point=(100, 100), start_time=start_time)
+    # path = [(784, 1203), (824.5941418531968, 1398.0988815480077),
+    #         (822.041420065192, 1495.4286774299896), (857, 1596), (886, 1722),]
+    # speed = 10
+    # start_time = datetime.strptime(start_time, "%Y%m%d%H%M")
+    # result = check_path_collision(
+    #     path, speed, start_time, maps, animation_flag=True)
+    # print("Path safe:", result)
+    lat_min, lon_min = np.min(lookup_table, axis=(0, 1))  # 获取最小的经纬度
+    lat_max, lon_max = np.max(lookup_table, axis=(0, 1))  # 获取最大的经纬度
+
+    print(f"Left Bottom Corner: (lat: {lat_min}, lon: {lon_min})")
+    print(f"Top Right Corner: (lat: {lat_max}, lon: {lon_max})")

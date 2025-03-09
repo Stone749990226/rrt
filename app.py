@@ -1,18 +1,9 @@
-import copy
-import random
-import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timedelta
-import cProfile
-import requests
-import cv2
 from io import BytesIO
-import scipy
 import pytz
-import os
-import math
 from scipy.spatial.transform import Rotation as Rot
 import logging
 from matplotlib import patches, pyplot as plt
@@ -25,9 +16,6 @@ from config import config
 
 animation = config["animation"]
 maps = {}
-speed = 6  # 每分钟能走多少像素格子
-map_interval = 15  # 地图切换间隔为15分钟
-threshold_distance = speed * map_interval
 
 start_time = None
 mark_time = None
@@ -194,16 +182,16 @@ async def calculate_route(request: RequestBody):
 if __name__ == "__main__":
     request_data = {
         "start": {
-            "lat": 17.476432197195518,
-            "lon": 114.87304687500001
+            "lat": 29.49698759653577,
+            "lon": 99.7998046875
         },
         "end": {
-            "lat": 12.897489183755892,
-            "lon": 133.37402343750003
+            "lat": 12.297068292853817,
+            "lon": 134.07714843750003
         },
-        "start_time": "2024-11-13 07:30",
-        "mark_time": "2024-11-13 07:30",
-        "speed": 700,
+        "start_time": "2024-11-13 10:00",
+        "mark_time": "2024-11-13 07:00",
+        "speed": 500,
         "time_step": 15,
         "threshold": 0,
         "structure_size": 5

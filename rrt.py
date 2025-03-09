@@ -1,44 +1,28 @@
 import bisect
+import cProfile
 from datetime import timedelta
 import logging
 import math
 import time
+from typing import Tuple
 from matplotlib import patches, pyplot as plt
 from matplotlib.widgets import Button
 import yaml
-from utils import generate_combined_map, get_images_path, insert_intermediate_points
+from utils import Node, check_path_collision, generate_combined_map, get_images_path, has_collision, insert_intermediate_points
 import numpy as np
-
+from scipy.spatial import cKDTree
 with open('rrt_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 animation = config["animation"]
 
 
-class Node:
-    """each node has varieties:row,col,parent"""
-
-    def __init__(self, r=0, c=0, f=None):
-        self.row = r
-        self.col = c
-        self.parent = f
-        self.distance = 0
-        parent = self.parent
-        # 如果路径发生了变动时（例如，节点可能会被修改或重连），循环计算distance才比较准确。
-        while True:
-            if parent == None:
-                break
-            self.distance += np.sqrt((r-parent.row)**2+(c-parent.col)**2)
-            r = parent.row
-            c = parent.col
-            parent = parent.parent
-
-    def __str__(self):
-        return f"({self.row}, {self.col})"
-
-
 class RRT:
-    def __init__(self, width, height, step_size, end_lim, start: Node, end: Node, speed=6) -> None:
+    def __init__(self, width, height, step_size, end_lim, start: Node, end: Node, speed=6, use_config={
+        "use_heuristic": False,
+        "use_bidirectional": True,
+        "use_adaptive_step": True,
+            "collision_method": "bresenham"}) -> None:
         np.random.seed(42)
         self.t_iter_begin = time.time()
         # initial map & window
@@ -50,23 +34,23 @@ class RRT:
         self.speed = speed
         self.start = start
         self.end = end
-        self.map = np.zeros([self.height, self.width])
         self.col_map = np.zeros([self.height, self.width])
-        self.Co = []
-
+        self.obstacle_kdtree = None
+        self.use_config = use_config
         # node list
         # start_tree 和 end_tree 是分别从起点和终点开始生长的两棵 RRT* 树
         self.start_tree = [self.start]
-        self.end_tree = [self.end]
+        if self.use_config["use_bidirectional"]:
+            self.end_tree = [self.end]
 
         self.less_long_path = np.inf
         self.last_path_length = np.inf
         self.path_all = []
 
         self.adaptive_params = {
-            'goal_bias_base': 0.3,
-            'density_radius': 7,
-            'min_step_ratio': 0.2
+            'density_radius': 100,
+            'max_step_ratio': 1.5,
+            'min_step_ratio': 0.5
         }
 
         if animation:
@@ -91,6 +75,14 @@ class RRT:
             self.button_set_points.on_clicked(
                 self.on_button_set_points_clicked)
 
+    def set_start(self, start_row, start_col):
+        self.start = Node(start_row, start_col)
+        self.start_tree = [self.start]
+
+    def set_end(self, end_row, end_col):
+        self.end = Node(end_row, end_col)
+        self.end_tree = [self.end]
+
     def on_button_set_points_clicked(self, event):
         print("Click on the plot to set the start and end point.")
 
@@ -107,10 +99,9 @@ class RRT:
         if event.inaxes != self.ax:  # 如果点击的区域不是坐标轴区域
             return
         # 获取点击的坐标（取整）
-        clicked_point = Node(round(event.ydata), round(event.xdata), None)
+        clicked_point = (round(event.ydata), round(event.xdata))
         if self.mode == 'start':
-            self.start = clicked_point
-            self.start_tree = [self.start]
+            self.set_start(clicked_point[0], clicked_point[1])
             print(f"Start point set at: {self.start}")
             self.ax.scatter(self.start.col, self.start.row,
                             c='red', label='Start', zorder=5, s=3)
@@ -118,8 +109,7 @@ class RRT:
             self.mode = 'end'
             print("Now, click to set the end point.")
         elif self.mode == 'end':
-            self.end = clicked_point
-            self.end_tree = [self.end]
+            self.set_end(clicked_point[0], clicked_point[1])
             print(f"End point set at: {self.end}")
             self.ax.scatter(self.end.col, self.end.row,
                             c='blue', label='End', zorder=5, s=3)
@@ -130,82 +120,57 @@ class RRT:
             self.cid = None
             self.search_path()
 
-    def set_col_map(self, bin_map):
-        self.col_map = bin_map
+    def calculate_step_size(self, node):
+        pos = np.array([node.row, node.col])
+        count = self.obstacle_kdtree.query_ball_point(
+            pos,
+            r=self.adaptive_params['density_radius'],
+            return_length=True
+        )
+        if count == 0:
+            adaptive_step = self.step_size * \
+                self.adaptive_params['max_step_ratio']
+        elif 0 < count < 5:
+            adaptive_step = self.step_size
+        else:
+            adaptive_step = self.step_size * \
+                self.adaptive_params['min_step_ratio']
+        return adaptive_step
+
+    def calculate_density(self, node):
+        """优化后的密度计算方法（使用KD树加速）"""
+        if self.obstacle_kdtree is None:
+            return 0.0
+
+        # 使用圆形区域查询代替矩形区域
+        pos = np.array([node.row, node.col])
+        count = self.obstacle_kdtree.query_ball_point(
+            pos,
+            r=self.adaptive_params['density_radius'],
+            return_length=True
+        )
+        return count
+        # area = np.pi * (self.adaptive_params['density_radius']**2)
+        # return count / max(area, 1)  # 防止除以零
+
+    def set_col_map(self, binary_map):
+        self.col_map = binary_map
+        if self.use_config["use_adaptive_step"]:
+            obstacle_points = np.column_stack(np.where(binary_map == 1))
+            self.obstacle_kdtree = cKDTree(obstacle_points)
 
         if animation:
             # 获取障碍物的位置并绘制
-            obstacle_positions = np.column_stack(np.where(bin_map == 1))
+            obstacle_positions = np.column_stack(np.where(binary_map == 1))
             self.obs_scatter.set_offsets(obstacle_positions[:, [1, 0]])
             self.fig.canvas.draw()
-            plt.pause(0.1)  # 暂停0.1秒
-
-    def has_collision(self, node1: Node, node2: Node) -> bool:
-        # 使用 Bresenham 算法生成路径上的所有网格点，检查是否有障碍物
-        x0, y0 = int(node1.row), int(node1.col)
-        x1, y1 = int(node2.row), int(node2.col)
-
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-
-        current_x, current_y = x0, y0
-
-        while True:
-            # 检查当前网格点是否碰撞
-            if self.col_map[current_x][current_y] > 0:
-                return True
-            if current_x == x1 and current_y == y1:
-                break
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                current_x += sx
-            if e2 < dx:
-                err += dx
-                current_y += sy
-
-        return False
+            plt.pause(0.01)  # 暂停0.1秒
 
     def point_in_obstacle(self, point):
         return self.col_map[point[0]][point[1]] == 1
 
-    def calculate_obstacle_density(self, row, col):
-        """计算节点周围障碍物密度"""
-        radius = self.adaptive_params['density_radius']
-        min_row = max(0, int(row)-radius)
-        max_row = min(self.height-1, int(row)+radius)
-        min_col = max(0, int(col)-radius)
-        max_col = min(self.width-1, int(col)+radius)
-
-        obstacle_count = np.sum(
-            self.col_map[min_row:max_row+1, min_col:max_col+1])
-        area = (max_row - min_row + 1) * (max_col - min_col + 1)
-        return obstacle_count / area if area > 0 else 0
-
-    def get_adaptive_step(self, density):
-        """根据障碍物密度计算自适应步长"""
-        min_step = self.step_size * self.adaptive_params['min_step_ratio']
-        return self.step_size * (1 - density) + min_step * density
-
-    def sample_and_steer(self, flag, mk_dir_flag):
-        """采样新节点并生成路径"""
-        # 障碍物感知采样逻辑
-        if mk_dir_flag:
-            new_r, new_c = self.informed_sample()
-        else:
-            new_r, new_c = self.random_sample()
-
-        # 寻找最近节点
-        nearest_node = self.find_nearest_node(self.start_tree, new_r, new_c)
-
-        # 生成新节点
-        return self.steer(nearest_node, new_r, new_c)
-
     def informed_sample(self, cMax, cMin):
-        if cMax == float('inf'):
+        if not self.use_config["use_heuristic"] or cMax == np.inf or abs(cMax - cMin) < 50:
             # 如果尚未找到路径，退化为全图随机采样
             new_r = np.random.uniform(0, self.height)
             new_c = np.random.uniform(0, self.width)
@@ -213,6 +178,7 @@ class RRT:
 
         # 椭圆参数计算
         a = cMax / 2.0
+
         b = math.sqrt(cMax**2 - cMin**2) / 2.0
 
         # 椭圆中心（中点）
@@ -225,7 +191,7 @@ class RRT:
         theta = math.atan2(dy, dx)
 
         # 在单位圆内生成均匀分布的随机点
-        r = math.sqrt(np.random.random())  # sqrt确保均匀分布
+        r = np.random.random()  # sqrt确保均匀分布
         angle = 2 * math.pi * np.random.random()
         x = r * math.cos(angle)
         y = r * math.sin(angle)
@@ -255,41 +221,46 @@ class RRT:
         return nearest_node, key_value
 
     def steer(self, tree: list[Node], new_r, new_c, tree_index):
-        # "Near". find rule:only the distance
-        # 遍历 start_tree 中所有节点，找到 欧几里得距离最近的节点 temp_node
-
+        if not self.use_config["use_bidirectional"]:
+            # 强制使用单向搜索逻辑
+            tree_index = 1  # 始终操作start_tree
+        # 找到最近的节点
         nearest_node = min(tree, key=lambda node: (
             node.row - new_r)**2 + (node.col - new_c)**2)
 
-        # "Steer" and "Edge". link nodes
+        # 计算自适应步长
+        if self.use_config["use_adaptive_step"]:
+            adaptive_step = self.calculate_step_size(nearest_node)
+            # density = self.calculate_density(nearest_node)
+            # min_step = self.step_size * self.adaptive_params['min_step_ratio']
+            # adaptive_step = self.step_size * (1 - density) + min_step * density
+            # adaptive_step = max(min_step, min(adaptive_step, self.step_size))
+        else:
+            adaptive_step = self.step_size
         distance = np.sqrt((nearest_node.row - new_r)**2 +
                            (nearest_node.col - new_c)**2)
 
-        if distance <= self.step_size:
-            # 如果最近的节点与新节点的距离 小于步长，直接创建 new_node 连接 temp_node
+        if distance <= adaptive_step:
             new_node = Node(new_r, new_c, nearest_node)
-
         else:
-            # 如果 大于步长，则沿着 temp_node → (new_r, new_c) 方向移动 step_size 进行扩展，创建 new_node
-            add_row = (new_r - nearest_node.row) * \
-                self.step_size / distance + nearest_node.row
-            add_col = (new_c - nearest_node.col) * \
-                self.step_size / distance + nearest_node.col
+            ratio = adaptive_step / distance
+            add_row = nearest_node.row + (new_r - nearest_node.row) * ratio
+            add_col = nearest_node.col + (new_c - nearest_node.col) * ratio
             new_node = Node(add_row, add_col, nearest_node)
 
-        # rewire
+        # 保留原有碰撞检测和rewire逻辑
         if config["rewire"]:
             for node in tree:
                 distance = np.sqrt((new_node.col-node.col)**2 +
                                    (new_node.row-node.row)**2)
-                if distance < int(self.step_size):
+                if distance < int(adaptive_step):  # 使用动态步长判断
                     if node == new_node.parent or node == self.start or node == self.end:
                         continue
                     if distance+new_node.distance < node.distance:
                         node.parent = new_node
                         node.distance = distance+new_node.distance
 
-        if self.has_collision(nearest_node, new_node):
+        if has_collision(self.col_map, nearest_node, new_node, method=self.use_config["collision_method"]):
             if tree_index == 2:
                 self.start_tree, self.end_tree = self.end_tree, self.start_tree
             return None
@@ -300,36 +271,27 @@ class RRT:
             elif tree_index == 2:
                 color = 'lightblue'
             rect = patches.Rectangle(
-                (new_node.col - 2, new_node.row - 2), 4, 4,  # (x, y), 宽度, 高度
+                (new_node.col - 2, new_node.row - 2), 4, 4,
                 linewidth=1, edgecolor='green', facecolor='green'
             )
             self.ax.add_patch(rect)
-            # 创建直线
-            self.ax.plot([new_node.col, nearest_node.col], [
-                new_node.row, nearest_node.row], color=color, linewidth=1)
+            self.ax.plot([new_node.col, nearest_node.col],
+                         [new_node.row, nearest_node.row], color=color, linewidth=1)
             self.fig.canvas.draw_idle()
             plt.pause(0.01)
 
         return new_node
 
     def spring(self, tree_index, informed_sample_flag=1):
-        # 障碍物感知参数
-        MAX_GOAL_BIAS = 0.7  # 最大目标偏置概率
-        MIN_GOAL_BIAS = 0.1  # 最小目标偏置概率
-        DENSITY_THRESHOLD = 0.3  # 密度阈值
-
-        new_r = int(self.height * np.random.rand())
-        new_c = int(self.width * np.random.rand())
-        # mk_dir_flag 控制是否进行受限区域采样（Informed RRT* 椭圆采样）
+        if not self.use_config["use_bidirectional"]:
+            # 强制使用单向搜索逻辑
+            tree_index = 1  # 始终操作start_tree
+        # 生成新节点
         if informed_sample_flag:
-            # 计算起点到终点的直线距离作为cMin
             cMin = math.sqrt((self.start.row - self.end.row) **
                              2 + (self.start.col - self.end.col)**2)
-            # 使用椭圆采样
-            new_r, new_c = self.informed_sample(self.less_long_path, cMin)
-            # 转换为整数坐标（适配栅格地图）
-            new_r = int(round(new_r))
-            new_c = int(round(new_c))
+            cMax = self.less_long_path
+            new_r, new_c = self.informed_sample(cMax, cMin)
         else:
             new_r = int(self.height * np.random.rand())
             new_c = int(self.width * np.random.rand())
@@ -339,13 +301,19 @@ class RRT:
             self.start_tree, self.end_tree = self.end_tree, self.start_tree
 
         new_node = self.steer(self.start_tree, new_r, new_c, tree_index)
-
         if new_node is None:
             return False
 
         # add the new node into node list
         self.start_tree.append(new_node)
 
+        if not self.use_config["use_bidirectional"]:
+            # 单向模式下检查是否到达终点附近
+            distance = (new_node.row - self.end.row)**2 + \
+                (new_node.col - self.end.col)**2
+            if distance <= self.end_lim**2:
+                return True
+            return False
         # the tree birthed from the end node;
         # 在第一颗树和新节点作用完成后，去考虑另一个树，从原来的树开始一直往new node连接，一直到撞到障碍物或者连接到new node（搜索结束）
         new_node2 = self.steer(self.end_tree, new_r, new_c, tree_index)
@@ -379,7 +347,7 @@ class RRT:
                     new_node3 = Node(add_row, add_col, new_node2)
 
                 # check collision the second time: whether the path is in the collision!
-                if self.has_collision(new_node2, new_node3):
+                if has_collision(self.col_map, new_node2, new_node3, method=self.use_config["collision_method"]):
                     if tree_index == 2:
                         self.start_tree, self.end_tree = self.end_tree, self.start_tree
                     return False
@@ -416,8 +384,8 @@ class RRT:
             # if now-self.t_s>10:S
             #     print('no path')
             #     exit()
-            # 1. 如果当前路径和上次路径长度差异小于 0.5 且路径已经收敛，则退出。
-            # 2. 如果 算法运行时间超过 0.5 秒，且至少已经找到一条路径，则退出
+            # 1. 如果当前路径和上次路径长度差异小于 path_len_diff 且路径已经收敛，则退出。
+            # 2. 如果 算法运行时间超过 max_iter_time 秒，且至少已经找到一条路径，则退出
             if abs(self.last_path_length - self.less_long_path) < config["path_len_diff"] and len(self.path_all) > 1 and self.last_path_length != self.less_long_path \
                     or \
                     now-self.t_iter_begin > config["max_iter_time"] and len(self.path_all) > 0:
@@ -430,7 +398,7 @@ class RRT:
             # consistently spring up new node until meet end requirement
             # spring the tree first which has less nodes
             # 如果 start_tree（从起点生长的树）的节点数量 小于等于 end_tree（从终点生长的树），则扩展 start_tree。否则，扩展 end_tree。
-            if len(self.start_tree) <= len(self.end_tree):
+            if self.use_config["use_bidirectional"] and len(self.start_tree) <= len(self.end_tree):
                 is_success = self.spring(1, informed_sample_flag)
             else:
                 is_success = self.spring(2, informed_sample_flag)
@@ -445,19 +413,18 @@ class RRT:
                                                       temp[1].row], color='black', linewidth=1)
             self.fig.canvas.draw()
         num = len(self.path) - 2
-        print('路径上包含了%d个节点' % num)
+        print('there are %d nodes betweeen start and end' % num)
         # print(self.path)
         self.path_length = 0
-        # calculate 2a=path_length
         for i in range(len(self.path) - 1):
             self.path_length += np.sqrt(
                 (self.path[i].row - self.path[i + 1].row) ** 2 + (self.path[i].col - self.path[i + 1].col) ** 2)
-        print('当前路径长度为：', self.path_length, end=',')
+        print('Current path len:', self.path_length, end=', ')
 
         if self.path_length <= self.less_long_path:
-            print('该路径优于上一次生成的路径，保留！')
+            print('This path is better. Save!')
         else:
-            print('该路径次于上一次生成的路径，删除！')
+            print('This path is worse. Delete!')
 
         # t_e = time.time()
         # print('搜索时间为:', t_e - self.t_s)
@@ -485,42 +452,49 @@ class RRT:
     # 在 双向 RRT 算法中，两棵树扩展到一定程度后，需要合并形成完整路径。这个函数就是寻找两棵树之间的最佳连接点，使得最终路径最短
     # 计算 start → temp1 → temp2 → end 这条完整路径
     def end_limitation(self):
-        # t1,t2是两个可连接的节点
-        t1 = None
-        t2 = None
-        path_all_length = np.inf
-        # start_tree和end_tree是两个tree
-        for temp1 in self.start_tree:
-            for temp2 in self.end_tree:
-                dis = np.inf
-                if (temp1.row - temp2.row) ** 2 + (temp1.col - temp2.col) ** 2 <= self.step_size ** 2:
-                    # calculate the length of all path
-                    temp_node = temp1
-                    dis = 0
-                    while True:
-                        if temp_node == self.start:
-                            break
-                        dis += np.sqrt(
-                            (temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
-                        temp_node = temp_node.parent
-                    temp_node = temp2
-                    while True:
-                        if temp_node == self.end:
-                            break
-                        dis += np.sqrt(
-                            (temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
-                        temp_node = temp_node.parent
-                    dis += np.sqrt((temp1.row - temp2.row) **
-                                   2 + (temp1.col - temp2.col) ** 2)
-                if dis < path_all_length:
-                    t1 = temp1
-                    t2 = temp2
-        if t1 == None:
-            return False
-        return t1, t2
+        if self.use_config["use_bidirectional"]:
+            # t1,t2是两个可连接的节点
+            t1 = None
+            t2 = None
+            path_all_length = np.inf
+            # start_tree和end_tree是两个tree
+            for temp1 in self.start_tree:
+                for temp2 in self.end_tree:
+                    dis = np.inf
+                    if (temp1.row - temp2.row) ** 2 + (temp1.col - temp2.col) ** 2 <= self.step_size ** 2:
+                        # calculate the length of all path
+                        temp_node = temp1
+                        dis = 0
+                        while True:
+                            if temp_node == self.start:
+                                break
+                            dis += np.sqrt(
+                                (temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
+                            temp_node = temp_node.parent
+                        temp_node = temp2
+                        while True:
+                            if temp_node == self.end:
+                                break
+                            dis += np.sqrt(
+                                (temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
+                            temp_node = temp_node.parent
+                        dis += np.sqrt((temp1.row - temp2.row) **
+                                       2 + (temp1.col - temp2.col) ** 2)
+                    if dis < path_all_length:
+                        t1 = temp1
+                        t2 = temp2
+            if t1 == None:
+                return False
+            return t1, t2
+        else:
+            nearest_to_goal = min(self.start_tree,
+                                  key=lambda n: (n.row - self.end.row)**2 + (n.col - self.end.col)**2)
+            return nearest_to_goal, self.end  # 返回最近节点和终点
 
-    def search_path(self, iternation=100, max_search_time=10):
-        if self.has_collision(self.start, self.end) is False:
+    def search_path(self, iternation=100):
+        print(
+            "*"*5, f"search path from start {self.start} to end {self.end}", "*"*5)
+        if not has_collision(self.col_map, self.start, self.end):
             logging.info("起点和终点的连线没有障碍物，可以直接通行")
             self.path = [self.start, self.end]
             self.path_all = [[self.start, self.end]]
@@ -533,7 +507,7 @@ class RRT:
             # 终止条件为迭代iternation次
             # 提前结束条件为：有成功路径且搜索时间超过1s/某次搜索的时间过长/路径长度收敛
             for i in range(iternation):
-                if time.time()-self.t_search_begin > max_search_time and len(self.path_all) > 0:
+                if time.time()-self.t_search_begin > config["max_search_time"] and len(self.path_all) > 0:
                     break
                 if self.is_success == False:  # 表示路径长度收敛了
                     break
@@ -542,11 +516,11 @@ class RRT:
                 # self.init_map()
                 self.update_path()
                 self.t_iter_end = time.time()
-                print('第 %d 次迭代的路径长度为：' % (i+1), self.path_length,
-                      '时间为：', self.t_iter_end - self.t_iter_begin)
+                print('iter %d : path' % (i+1), self.path_length,
+                      'time cost: ', self.t_iter_end - self.t_iter_begin)
             print('最优路径长度为：', self.less_long_path)
-            t_t_search_end = time.time()
-            print('总时间为:', t_t_search_end - self.t_search_begin)
+            t_search_end = time.time()
+            print('总时间为:', t_search_end - self.t_search_begin)
             # self.init_map()
         path_end = self.path_all[-1]
         self.path_final = []
@@ -577,7 +551,7 @@ class RRT:
             # 尝试连接尽可能远的节点
             farthest_safe = current_index + 1  # 至少保留下一个节点
             for check_index in range(len(path)-1, current_index, -1):
-                if not self.has_collision(path[current_index], path[check_index]):
+                if not has_collision(self.col_map, path[current_index], path[check_index], method=self.use_config["collision_method"]):
                     farthest_safe = check_index
                     break
             optimized.append(path[farthest_safe])
@@ -588,37 +562,50 @@ class RRT:
     # when make it, go back to find the relavently low cost path
     # 从 end_limitation 选出的两个连接点出发，回溯出一条完整的路径，并进行优化
     def results(self, temp_all):
-        # create the path list from start node to temp_all[0]
-        temp = temp_all[0]
-        res2 = []
-        res2.append(temp)
-        while temp != self.start:
-            temp = temp.parent
+        if self.use_config["use_bidirectional"]:
+            # create the path list from start node to temp_all[0]
+            temp = temp_all[0]
+            res2 = []
             res2.append(temp)
-        # reverse the results
-        res = []
-        l = len(res2) - 1
-        for i in range(len(res2)):
-            count = l - i
-            res.append(res2[count])
+            while temp != self.start:
+                temp = temp.parent
+                res2.append(temp)
+            # reverse the results
+            res = []
+            l = len(res2) - 1
+            for i in range(len(res2)):
+                count = l - i
+                res.append(res2[count])
 
-        # create the path list from temp_all[1] to end node
-        temp = temp_all[1]
-        res.append(temp)
-        while temp != self.end:
-            temp = temp.parent
+            # create the path list from temp_all[1] to end node
+            temp = temp_all[1]
             res.append(temp)
-        # return the full path
-        res = self.optim_path(res)
-        return res
+            while temp != self.end:
+                temp = temp.parent
+                res.append(temp)
+            # return the full path
+            res = self.optim_path(res)
+            return res
+        else:
+            # 单向模式路径生成
+            nearest_node, _ = temp_all
+            path = []
+            # 从最近节点回溯到起点
+            node = nearest_node
+            while node.parent:
+                path.append(node)
+                node = node.parent
+            path.reverse()
+            # 添加终点
+            path.append(self.end)
+            res = self.optim_path(path)
+            return res
 
     # draw arcs to find the better path
     def update_path(self):
         # node list
-        self.start_tree = []
-        self.end_tree = []
-        self.start_tree.append(self.start)
-        self.end_tree.append(self.end)
+        self.start_tree = [self.start]
+        self.end_tree = [self.end]
         self.extend(informed_sample_flag=1)
 
     def print_path(self):
@@ -629,15 +616,151 @@ class RRT:
             print("]")
 
 
+def test_rrt_with_config(n=20, configs=None):
+    import cProfile
+    # 默认测试配置
+    if configs is None:
+        configs = [
+            {"name": "Baseline", "use_heuristic": False, "use_bidirectional": True,
+                "use_adaptive_step": False, "collision_method": "bresenham"},
+            {"name": "+Heuristic", "use_heuristic": False, "use_bidirectional": True,
+                "use_adaptive_step": True, "collision_method": "bresenham"},
+            {"name": "+AdaptiveStep", "use_heuristic": True, "use_bidirectional": True,
+                "use_adaptive_step": True, "collision_method": "bresenham"},
+            {"name": "+Bresenham", "use_heuristic": False, "use_bidirectional": True,
+                "use_adaptive_step": False, "collision_method": "bresenham"},
+            # {"name": "All Improvements", "use_heuristic": True,
+            #     "use_bidirectional": True, "use_adaptive_step": True, "collision_method": "bresenham"}
+        ]
+
+    # 生成测试用例（所有配置共享同一组测试用例）
+    np.random.seed(999)  # 固定随机种子
+    test_cases = []
+    map_generated = False
+    col_map = None
+
+    # 生成障碍物地图（所有测试用例使用同一地图）
+    while not map_generated:
+        try:
+            start_time = "202411130728"
+            mark_time = "2024111307015"
+            png_paths = get_images_path(start_time, mark_time)
+            col_map = generate_combined_map(
+                png_paths, speed=6, start_point=(100, 100), start_time=start_time)
+            map_generated = True
+        except:
+            pass
+
+    # 生成有效的测试用例
+    while len(test_cases) < n:
+        start_r = np.random.randint(0, config["height"])
+        start_c = np.random.randint(0, config["width"])
+        end_r = np.random.randint(0, config["height"])
+        end_c = np.random.randint(0, config["width"])
+
+        # 有效性检查
+        if (col_map[start_r][start_c] == 0 and
+            col_map[end_r][end_c] == 0 and
+                has_collision(col_map, Node(start_r, start_c), Node(end_r, end_c))):
+            test_cases.append(((start_r, start_c), (end_r, end_c)))
+
+    # 执行测试
+    results = {}
+    for cfg in configs:
+        print(f"\n=== 正在测试配置：{cfg['name']} ===")
+        success = 0
+        total_time = 0
+        path_lengths = []
+        profiler = cProfile.Profile()
+        profiler.enable()  # 开始性能分析
+        for (start, end) in test_cases:
+            start_node = Node(start[0], start[1])
+            end_node = Node(end[0], end[1])
+
+            # 初始化RRT
+            rrt = RRT(
+                width=config["width"],
+                height=config["height"],
+                step_size=config["step_size"],
+                end_lim=config["end_lim"],
+                start=start_node,
+                end=end_node,
+                use_config=cfg,
+            )
+            rrt.set_col_map(col_map)
+            np.random.seed(42)  # 固定随机种子
+            # 执行搜索
+            try:
+                start_time = time.time()
+                path = rrt.search_path()
+                elapsed = time.time() - start_time
+
+                if path:
+                    success += 1
+                    total_time += elapsed
+                    path_lengths.append(rrt.less_long_path)
+            except Exception as e:
+                print(f"测试失败：{str(e)}")
+                raise RuntimeError
+                continue
+        profiler.disable()  # 停止性能分析
+        profiler.print_stats(sort="time")  # 输出性能分析结果
+        # 记录结果
+        avg_time = total_time / success if success > 0 else 0
+        avg_length = np.mean(path_lengths) if path_lengths else 0
+        success_rate = success / len(test_cases)
+
+        results[cfg['name']] = {
+            "success_rate": success_rate,
+            "avg_time": avg_time,
+            "avg_length": avg_length
+        }
+
+    # 打印结果
+    print("\n=== 测试结果汇总 ===")
+    print("{:<20} {:<15} {:<15} {:<15}".format(
+        "配置名称", "成功率", "平均时间(s)", "平均长度"))
+
+    for name in ["Baseline", "+Heuristic", "+Bidirectional",
+                 "+AdaptiveStep", "+Bresenham", "All Improvements"]:
+        if name in results:
+            data = results[name]
+            print("{:<20} {:<15.2%} {:<15.2f} {:<15.2f}".format(
+                name,
+                data["success_rate"],
+                data["avg_time"],
+                data["avg_length"]
+            ))
+
+    return results
+
+
 if __name__ == "__main__":
+    # test_rrt_with_config(30)
     start_time = "202411130728"
     mark_time = "2024111307015"
-    speed = 6
 
+    speed = 4
+    use_config = {
+        "use_heuristic": True,
+        "use_bidirectional": True,
+        "use_adaptive_step": False,
+        "collision_method": "bresenham"
+    }
     rrt_agent = RRT(config["width"], config["height"],
-                    config["step_size"], config["end_lim"], None, None)
+                    config["step_size"], config["end_lim"], Node(149, 1604), Node(88, 1813), use_config=use_config)
     png_paths = get_images_path(start_time, mark_time)
     rrt_agent.set_col_map(generate_combined_map(
-        png_paths, speed=speed, start_point=(100, 100), start_time=start_time))
+        png_paths, speed=speed, start_point=(149, 1604), start_time=start_time))
+    # plt.show()
+    # profiler = cProfile.Profile()
+    # profiler.enable()  # 开始性能分析
+    rrt_agent.search_path()
     plt.show()
-    plt.pause(10000)
+    # profiler.disable()
+    # profiler.print_stats(sort="time")  # 输出性能分析结果
+    # plt.pause(100)
+    path = rrt_agent.path_final
+    # print(path)
+    check_path_collision(path=path, speed=speed,
+                         start_time=start_time, animation_flag=animation)
