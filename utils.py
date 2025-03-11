@@ -8,16 +8,12 @@ import matplotlib.pyplot as plt
 import os
 import numpy as np
 import logging
-import time
 from datetime import datetime, timedelta
 from matplotlib import animation, pyplot as plt
 from matplotlib import patches
-from matplotlib.patches import Rectangle
-from matplotlib.widgets import Button
+from config import GLOBAL_CONFIG
 from scipy.ndimage import binary_dilation
 import re
-
-from config import config, path_prefix
 
 maps = {}
 lookup_table = np.load('cloud_look_up_table_v2.npy')
@@ -52,11 +48,11 @@ def align_time_15m(time_str: str):
     return aligned_time.strftime("%Y%m%d%H%M")
 
 
-def get_images_path(start_time, mark_time, prefix=path_prefix):
+def get_images_path(start_time, mark_time):
     """/data/ImageData/20241206/11/cloud_dugs_unet_3h/16-45"""
     res = []
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
-    if config["env_mode"] == "local":
+    if GLOBAL_CONFIG["env_mode"] == "local":
         for root, dirs, files in os.walk("./07-00"):
             for file in files:
                 if file.endswith('.png'):
@@ -68,10 +64,11 @@ def get_images_path(start_time, mark_time, prefix=path_prefix):
             raise HTTPException(
                 status_code=404, detail=f"Image not found for the dir: {dir}")
         res.sort()
-    elif config["env_mode"] == "server":
+    elif GLOBAL_CONFIG["env_mode"] == "server":
         date = mark_time[:8]
         hm = mark_time[8:10] + "-" + mark_time[10:12]
-        dir = prefix + date + "/11/cloud_dugs_unet_3h/" + hm
+        dir = GLOBAL_CONFIG["image_path"] + \
+            date + "/11/cloud_dugs_unet_3h/" + hm
         for root, dirs, files in os.walk(dir):
             for file in files:
                 if file.endswith('.png'):
@@ -100,7 +97,7 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
 
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
 
-    map_shape = (config["height"], config["width"])  # 获取地图尺寸
+    map_shape = (GLOBAL_CONFIG["height"], GLOBAL_CONFIG["width"])  # 获取地图尺寸
 
     # 初始化最终的综合障碍物地图
     combined_map = np.zeros(map_shape, dtype=np.uint8)

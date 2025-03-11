@@ -4,3 +4,4 @@ server.log
 rrt_config.yaml
 *.png
 *.gif
+path_planning.tar

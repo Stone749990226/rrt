@@ -8,17 +8,13 @@ WORKDIR /app
 COPY requirements.txt .
 
 # 升级 pip 并安装依赖（使用清华镜像源）
-RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制所有当前目录文件到容器的工作目录（/app）
 COPY . .
 
-# 暴露端口（默认 8123）
-ENV APP_PORT=8123
-EXPOSE ${APP_PORT}
-
 RUN mkdir -p /logs
 
 # 启动命令（JSON 格式，避免信号问题）
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${APP_PORT} --log-level info > /logs/uvicorn.log 2>&1"]
+CMD ["python", "main.py"]

@@ -7,31 +7,86 @@ from scipy.spatial.transform import Rotation as Rot
 import logging
 from matplotlib import patches, pyplot as plt
 from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 from utils import check_path_collision, generate_combined_map, get_wh, haversine, lookup_table, pos2pix, get_images_path
 from rrt import Node, RRT
+from pathlib import Path
+import config
+from config import GLOBAL_CONFIG
+import argparse
 
-from config import config
-# 全局变量
+parser = argparse.ArgumentParser(description="start of unicorn")
+parser.add_argument("--app_host", default="0.0.0.0",
+                    type=str, help="web服务器监听的ip，公网访问需要为0.0.0.0")
+parser.add_argument("--app_port", default=8123, type=int, help="web服务器监听的端口")
+parser.add_argument("--height", default=1060, help="image height", type=int)
+parser.add_argument("--width", default=1824, help="image width", type=int)
+parser.add_argument("--step_size", default=50,
+                    help="RRT algorithm step size", type=int)
+parser.add_argument("--end_lim", default=50,
+                    help="RRT algorithm end limit", type=int)
+parser.add_argument("--max_iter_time", default=10,
+                    help="RRT algorithm max time cost in each iteration", type=int)
+parser.add_argument("--max_search_time", default=20,
+                    help="RRT algorithm max time cost during the whole search", type=int)
+parser.add_argument("--path_len_diff", default=1, help="", type=int)
+parser.add_argument("--animation", action="store_true",
+                    help="whether show animation")
+parser.add_argument("--rewire", action="store_true",
+                    help="RRT algorithm use rewire(目前存在问题)")
+parser.add_argument(
+    "--env",
+    choices=["local", "production"],  # 允许的值
+    default="local",                  # 默认值
+    help="指定运行环境（默认：local）"
+)
 
-animation = config["animation"]
+
 maps = {}
 
 start_time = None
 mark_time = None
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-ch = logging.StreamHandler()
-fh = logging.FileHandler(filename='/logs/server.log')
-formatter = logging.Formatter(
-    "%(asctime)s - %(module)s - %(funcName)s - line:%(lineno)d - %(levelname)s - %(message)s"
-)
+# 确保日志目录存在
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True, parents=True)  # 自动递归创建目录
 
-ch.setFormatter(formatter)
-fh.setFormatter(formatter)
-logger.addHandler(ch)  # 将日志输出至屏幕
-logger.addHandler(fh)  # 将日志输出至文件
+
+def setup_logging():
+    """初始化应用日志配置"""
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # 创建统一格式
+    formatter = logging.Formatter(
+        "%(asctime)s - %(module)s - %(funcName)s - line:%(lineno)d - %(levelname)s - %(message)s"
+    )
+
+    # 控制台处理器
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+
+    # 文件处理器
+    fh = logging.FileHandler(filename=LOG_DIR / "server.log")
+    fh.setFormatter(formatter)
+
+    # 配置根日志
+    logger.addHandler(ch)
+    logger.addHandler(fh)
+
+    # 特别配置 Uvicorn 日志处理器
+    uvicorn_error = logging.getLogger("uvicorn.error")
+    uvicorn_access = logging.getLogger("uvicorn.access")
+
+    # 清除原有处理器
+    for uv_logger in [uvicorn_error, uvicorn_access]:
+        uv_logger.handlers.clear()
+        uv_logger.addHandler(fh)  # 添加文件处理器
+        uv_logger.addHandler(ch)  # 保留控制台输出
+        uv_logger.propagate = False  # 禁止向上传播
+
+
 # 创建 FastAPI 应用
 app = FastAPI()
 
@@ -106,7 +161,7 @@ def calculate_response(data: RequestBody) -> ResponseBody:
         data.mark_time, "%Y-%m-%d %H:%M").strftime("%Y%m%d%H%M")
     png_paths = get_images_path(start_time, mark_time)
 
-    rrt_agent = RRT(config["width"], config["height"], config["step_size"], config["end_lim"], Node(
+    rrt_agent = RRT(config.GLOBAL_CONFIG["width"], config.GLOBAL_CONFIG["height"], config.GLOBAL_CONFIG["step_size"], config.GLOBAL_CONFIG["end_lim"], Node(
         row_start, col_start), Node(row_goal, col_goal))
     rrt_agent.set_col_map(generate_combined_map(
         png_paths, speed=speed, start_point=(row_start, col_start), start_time=start_time))
@@ -126,10 +181,10 @@ def calculate_response(data: RequestBody) -> ResponseBody:
         logging.error("start or end point is in obstacle")
         return ResponseBody(route=route, summary=summary)
     path = rrt_agent.search_path()
-    if animation:
+    if GLOBAL_CONFIG["animation"]:
         print(path)
         check_path_collision(path=path, speed=speed,
-                             start_time=start_time, animation_flag=animation)
+                             start_time=start_time, animation_flag=GLOBAL_CONFIG["animation"])
     # profiler.disable()  # 停止性能分析
     # profiler.print_stats(sort="time")  # 输出性能分析结果
 
@@ -173,27 +228,46 @@ def calculate_response(data: RequestBody) -> ResponseBody:
 
 
 # 定义 POST 路由
-@app.post("/api/route", response_model=ResponseBody)
+@app.post("/routing/route", response_model=ResponseBody)
 async def calculate_route(request: RequestBody):
     response = calculate_response(request)
     return response
 
 if __name__ == "__main__":
-    request_data = {
-        "start": {
-            "lat": 29.49698759653577,
-            "lon": 99.7998046875
-        },
-        "end": {
-            "lat": 12.297068292853817,
-            "lon": 134.07714843750003
-        },
-        "start_time": "2024-11-13 10:00",
-        "mark_time": "2024-11-13 07:00",
-        "speed": 500,
-        "time_step": 15,
-        "threshold": 0,
-        "structure_size": 5
-    }
+    setup_logging()
+    args = parser.parse_args()
 
-    print(calculate_response(RequestBody(**request_data)))
+    config.set_config("height", args.height)
+    config.set_config("width", args.width)
+    config.set_config("step_size", args.step_size)
+    config.set_config("end_lim", args.end_lim)
+    config.set_config("max_iter_time", args.max_iter_time)
+    config.set_config("max_search_time", args.max_search_time)
+    config.set_config("path_len_diff", args.path_len_diff)
+    config.set_config("animation", args.animation)
+    config.set_config("rewire", args.rewire)
+    logging.info(GLOBAL_CONFIG)
+    uvicorn.run(
+        app="main:app",
+        host=args.app_host,
+        port=args.app_port,
+        log_level="debug"
+    )
+    # request_data = {
+    #     "start": {
+    #         "lat": 29.49698759653577,
+    #         "lon": 99.7998046875
+    #     },
+    #     "end": {
+    #         "lat": 12.297068292853817,
+    #         "lon": 134.07714843750003
+    #     },
+    #     "start_time": "2024-11-13 10:00",
+    #     "mark_time": "2024-11-13 07:00",
+    #     "speed": 500,
+    #     "time_step": 15,
+    #     "threshold": 0,
+    #     "structure_size": 5
+    # }
+
+    # print(calculate_response(RequestBody(**request_data)))
