@@ -246,7 +246,7 @@ def pos2pix(lat, lon):
     diff = np.sqrt((lookup_table[:, :, 0] - lat) **
                    2 + (lookup_table[:, :, 1] - lon) ** 2)
     i, j = np.unravel_index(np.argmin(diff), diff.shape)
-    logging.info(f"(lat {lat}, lon {lon}) pix: row {i}, col {j})")
+    print(f"(lat {lat}, lon {lon}) pix: row {i}, col {j})")
     return i, j
 
 

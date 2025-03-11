@@ -189,7 +189,7 @@ def calculate_response(data: RequestBody) -> ResponseBody:
     # profiler.disable()  # 停止性能分析
     # profiler.print_stats(sort="time")  # 输出性能分析结果
 
-    logging.info(path)
+    print(path)
 
     start_utc = datetime.strptime(data.start_time, "%Y-%m-%d %H:%M")
     start_utc = pytz.utc.localize(start_utc)  # 设置为UTC时区
@@ -250,7 +250,8 @@ if __name__ == "__main__":
     config.set_config("animation", args.animation)
     config.set_config("rewire", args.rewire)
     config.set_config("image_path", args.image_path)
-    logging.info(GLOBAL_CONFIG)
+    # logging.info(GLOBAL_CONFIG)
+    print(GLOBAL_CONFIG)
     uvicorn.run(
         app="main:app",
         host=args.app_host,

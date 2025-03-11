@@ -8,14 +8,14 @@ uvicorn app2:app --log-level info --port 8123 --host 127.0.0.1 > uvicorn.log 2>&
 docker里运行：
 ```shell
 docker build -t path_planning:1.0 .
-PORT=8882 && docker run -p ${PORT}:${PORT} \
+docker run -it -p 8123:8123 \
   --name path_planning_container \
   -v /data/ImageData:/data/ImageData \
   -v $(pwd)/logs:/logs \
   path_planning
 ```
 如果想后台运行加上-d参数。
-如果需要修改图片路径，改成下面的命令
+如果需要切换端口和图片路径，改成下面的命令
 ```shell
 PORT=8882 && docker run -p ${PORT}:8123 \
   --name path_planning_container \
