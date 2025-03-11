@@ -10,8 +10,6 @@ docker里运行：
 docker build -t path_planning:1.0 .
 PORT=8882 && docker run -p ${PORT}:${PORT} \
   --name path_planning_container \
-  -e APP_PORT=${PORT} \
-  -e PATH_PREFIX=/data/ImageData/ \
   -v /data/ImageData:/data/ImageData \
   -v $(pwd)/logs:/logs \
   path_planning
@@ -19,13 +17,11 @@ PORT=8882 && docker run -p ${PORT}:${PORT} \
 如果想后台运行加上-d参数。
 如果需要修改图片路径，改成下面的命令
 ```shell
-PORT=8882 && docker run -p ${PORT}:${PORT} \
+PORT=8882 && docker run -p ${PORT}:8123 \
   --name path_planning_container \
-  -e APP_PORT=${PORT} \
-  -e PATH_PREFIX=/data/ImageData/ \
   -v /mnt/disk1/caddy/ImageData:/data/ImageData \
   -v $(pwd)/logs:/logs \
-  path_planning:1.0
+  path_planning:1.0 
 ```
 
 停止运行方法：

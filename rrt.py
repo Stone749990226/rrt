@@ -1,4 +1,3 @@
-import bisect
 import cProfile
 from datetime import timedelta
 import logging
@@ -7,7 +6,6 @@ import time
 from typing import Tuple
 from matplotlib import patches, pyplot as plt
 from matplotlib.widgets import Button
-import yaml
 from utils import Node, check_path_collision, generate_combined_map, get_images_path, has_collision, insert_intermediate_points
 import numpy as np
 from scipy.spatial import cKDTree

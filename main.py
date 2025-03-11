@@ -1,14 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime, timedelta
 import pytz
 from scipy.spatial.transform import Rotation as Rot
 import logging
-from matplotlib import patches, pyplot as plt
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from utils import check_path_collision, generate_combined_map, get_wh, haversine, lookup_table, pos2pix, get_images_path
+from utils import check_path_collision, generate_combined_map, haversine, lookup_table, pos2pix, get_images_path
 from rrt import Node, RRT
 from pathlib import Path
 import config
@@ -34,6 +33,8 @@ parser.add_argument("--animation", action="store_true",
                     help="whether show animation")
 parser.add_argument("--rewire", action="store_true",
                     help="RRT algorithm use rewire(目前存在问题)")
+parser.add_argument("--image_path", default="/data/ImageData/",
+                    type=str, help="图片地址")
 parser.add_argument(
     "--env",
     choices=["local", "production"],  # 允许的值
@@ -237,6 +238,8 @@ if __name__ == "__main__":
     setup_logging()
     args = parser.parse_args()
 
+    config.set_config("app_port", args.app_port)
+    config.set_config("app_host", args.app_host)
     config.set_config("height", args.height)
     config.set_config("width", args.width)
     config.set_config("step_size", args.step_size)
@@ -246,12 +249,13 @@ if __name__ == "__main__":
     config.set_config("path_len_diff", args.path_len_diff)
     config.set_config("animation", args.animation)
     config.set_config("rewire", args.rewire)
+    config.set_config("image_path", args.image_path)
     logging.info(GLOBAL_CONFIG)
     uvicorn.run(
         app="main:app",
         host=args.app_host,
         port=args.app_port,
-        log_level="debug"
+        log_level="info"
     )
     # request_data = {
     #     "start": {
