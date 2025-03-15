@@ -62,7 +62,7 @@ def get_images_path(start_time, mark_time):
                         res.append(os.path.abspath(os.path.join(root, file)))
         if len(res) == 0:
             raise HTTPException(
-                status_code=404, detail=f"Image not found for the dir: {dir}")
+                status_code=404, detail=f"Image not found")
         res.sort()
     elif GLOBAL_CONFIG["env_mode"] == "server":
         date = mark_time[:8]

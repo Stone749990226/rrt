@@ -7,10 +7,10 @@ GLOBAL_CONFIG = {
     "max_iter_time": 10,
     "max_search_time": 20,
     "path_len_diff": 1,
-    "animation": True,
+    "animation": False,
     "rewire": False,
     "image_path": "/data/ImageData/",
-    "env_mode": "local"
+    "env_mode": "server"
 }
 
 
