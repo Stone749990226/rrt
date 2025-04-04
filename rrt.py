@@ -749,7 +749,7 @@ if __name__ == "__main__":
     # plt.show()
     # profiler = cProfile.Profile()
     # profiler.enable()  # 开始性能分析
-    rrt_agent.search_path()
+    # rrt_agent.search_path()
     plt.show()
     # profiler.disable()
     # profiler.print_stats(sort="time")  # 输出性能分析结果

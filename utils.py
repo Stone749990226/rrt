@@ -146,6 +146,16 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
     return combined_map
 
 
+def test_map():
+    start_time = "202411130728"
+    mark_time = "202411130715"
+
+    speed = 4
+    png_paths = get_images_path(start_time, mark_time)
+    return generate_combined_map(
+        png_paths, speed=speed, start_point=(149, 1604), start_time=start_time)
+
+
 def insert_intermediate_points(path, threshold_distance):
     new_path = [path[0]]  # 保持起点不变
     for i in range(1, len(path)):
