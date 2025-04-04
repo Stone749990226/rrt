@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+import time
 import bisect
 from datetime import datetime, timedelta
 import os
@@ -505,6 +507,14 @@ def animate_path(animation_data, maps, path, start_time, collision_info=None):
         fig, update, frames=int(end_time)+1, interval=50)
     ani.save('animation.gif', writer='pillow', fps=20)
     plt.show()
+
+
+@contextmanager
+def timer():
+    start = time.perf_counter()
+    yield
+    end = time.perf_counter()
+    print(f"耗时: {end - start:.4f} 秒")
 
 
 if __name__ == "__main__":
