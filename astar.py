@@ -5,8 +5,6 @@ A_star 2D
 
 import matplotlib.pyplot as plt
 import utils
-import os
-import sys
 import math
 import heapq
 from config import GLOBAL_CONFIG
