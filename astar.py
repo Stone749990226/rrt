@@ -496,10 +496,6 @@ class Plotting:
         self.ax.set_ylim(0, GLOBAL_CONFIG["height"])
         self.ax.invert_yaxis()
         self.ax.set_aspect('equal')
-        self.obs_scatter = self.ax.scatter(
-            [], [], c='black', s=1, zorder=1)
-        self.path_line, = self.ax.plot(
-            [], [], color='lightcoral', linewidth=2, zorder=10)
 
     def update_obs(self, obs):
         self.obs = obs

@@ -1,281 +1,207 @@
-"""
-人工势场寻路算法实现
-最基本的人工势场，存在目标点不可达及局部最小点问题
-"""
+import numpy as np
 import matplotlib.pyplot as plt
-import math
-import random
-from matplotlib import pyplot as plt
-from matplotlib.patches import Circle
-import time
+from time import time
 
-from utils import test_map, timer
+from config import GLOBAL_CONFIG
+from utils import test_map
 
 
-import math
+class APF:
+    """人工势场法路径规划 (NumPy优化版)"""
 
-
-class Vector2d:
-    """
-    2维向量，支持加减乘除，使用属性延迟计算提高性能
-    """
-
-    __slots__ = ('_deltaX', '_deltaY', '_length', '_direction')  # 减少内存占用
-
-    def __init__(self, x, y):
-        self._deltaX = x
-        self._deltaY = y
-        self._length = None
-        self._direction = None
-
-    @property
-    def deltaX(self):
-        """x分量只读属性"""
-        return self._deltaX
-
-    @property
-    def deltaY(self):
-        """y分量只读属性"""
-        return self._deltaY
-
-    @property
-    def length(self):
-        """向量长度，首次访问时计算并缓存"""
-        if self._length is None:
-            self._length = math.hypot(
-                self._deltaX, self._deltaY)  # 比sqrt更优化的计算方式
-        return self._length
-
-    @property
-    def direction(self):
-        """单位向量方向，首次访问时计算并缓存"""
-        if self._direction is None:
-            length = self.length
-            if length == 0:
-                self._direction = (0.0, 0.0)  # 零向量保持tuple类型统一
-            else:
-                self._direction = (self._deltaX / length,
-                                   self._deltaY / length)
-        return self._direction
-
-    def __add__(self, other):
-        """向量加法，直接返回新实例避免中间计算"""
-        return Vector2d(self._deltaX + other._deltaX, self._deltaY + other._deltaY)
-
-    def __sub__(self, other):
-        """向量减法"""
-        return Vector2d(self._deltaX - other._deltaX, self._deltaY - other._deltaY)
-
-    def __mul__(self, scalar):
-        """标量右乘，直接返回新实例"""
-        if not isinstance(scalar, (int, float)):
-            raise TypeError("只能与数值类型相乘")
-        return Vector2d(self._deltaX * scalar, self._deltaY * scalar)
-
-    def __rmul__(self, scalar):
-        """标量左乘"""
-        return self.__mul__(scalar)
-
-    def __truediv__(self, scalar):
-        """标量除法"""
-        if not isinstance(scalar, (int, float)):
-            raise TypeError("只能与数值类型相除")
-        return Vector2d(self._deltaX / scalar, self._deltaY / scalar)
-
-    def __repr__(self):
-        """优化字符串表示，避免重复计算"""
-        return (f"Vector2d(dx={self._deltaX}, dy={self._deltaY}, "
-                f"length={self.length:.2f}, dir={self.direction})")
-
-
-class APF():
-    """
-    人工势场寻路
-    """
-
-    def __init__(self, start, goal, obstacles, k_att: float, k_rep: float, rr: float,
-                 step_size: float, max_iters: int, goal_threshold: float, is_plot=False):
+    def __init__(self, start, goal, obstacles, k_att=1.0, k_rep=0.8, rr=3.0,
+                 step_size=0.2, max_iters=10000, goal_threshold=2, is_plot=False):
         """
-        :param start: 起点
-        :param goal: 终点
-        :param obstacles: 障碍物列表，每个元素为Vector2d对象
-        :param k_att: 引力系数
-        :param k_rep: 斥力系数
-        :param rr: 斥力作用范围
-        :param step_size: 步长
-        :param max_iters: 最大迭代次数
-        :param goal_threshold: 离目标点小于此值即认为到达目标点
-        :param is_plot: 是否绘图
+        :param start: 起点 (row, col)
+        :param goal: 目标点 (row, col)
+        :param obstacles: 障碍物列表 [[row1, col1], [row2, col2], ...]
+        :param rr: 斥力影响半径
         """
-        self.start = Vector2d(start[0], start[1])
-        self.current_pos = Vector2d(start[0], start[1])
-        self.goal = Vector2d(goal[0], goal[1])
-        self.obstacles = [Vector2d(OB[0], OB[1]) for OB in obstacles]
+        # 参数转换
+        start = (start[1], start[0])
+        goal = (goal[1], goal[0])
+        self.start = np.array(start, dtype=np.float32)
+        self.goal = np.array(goal, dtype=np.float32)
+        self.obstacles = obstacles
         self.k_att = k_att
         self.k_rep = k_rep
-        self.rr = rr  # 斥力作用范围
+        self.rr = rr
         self.step_size = step_size
         self.max_iters = max_iters
-        self.iters = 0
-        self.goal_threashold = goal_threshold
-        self.path = list()
-        self.is_path_plan_success = False
+        self.goal_threshold = goal_threshold
         self.is_plot = is_plot
+
+        # 运行状态
+        self.current_pos = self.start.copy()
+        self.path = np.empty((max_iters+1, 2))
+        self.path[0] = self.start
+        self.iters = 0
+        self.is_success = False
+
+        # 可视化参数
+        self.plot_interval = 50  # 绘图更新间隔
         self.delta_t = 0.01
 
-    def attractive(self):
-        """
-        引力计算
-        :return: 引力
-        """
-        att = (self.goal - self.current_pos) * self.k_att  # 方向由机器人指向目标点
-        return att
+        # 初始化可视化
+        if self.is_plot:
+            self.fig, self.ax = plt.subplots(figsize=(12, 7))
+            self.ax.set_xlim(0, GLOBAL_CONFIG["width"])
+            self.ax.set_ylim(0, GLOBAL_CONFIG["height"])
+            self.ax.invert_yaxis()
+            self.ax.set_aspect('equal')
+            self.ax.plot(start[0], start[1], "bs")
+            self.ax.plot(goal[0], goal[1], "gs")
+            self.ax.scatter([x[0] for x in self.obstacles], [x[1]
+                                                             for x in self.obstacles], c='black', s=1, zorder=1)
+            # for obs in self.obstacles:
+            #     self.ax.add_patch(Circle(obs, radius=rr, alpha=0.3))
+            #     self.ax.plot(*obs, 'xk')
+            plt.show(block=False)
 
-    def repulsion(self):
-        """
-        斥力计算
-        :return: 斥力大小
-        """
-        rep = Vector2d(0, 0)  # 所有障碍物总斥力
-        for obstacle in self.obstacles:
-            # obstacle = Vector2d(0, 0)
-            t_vec = self.current_pos - obstacle
-            if (t_vec.length > self.rr):  # 超出障碍物斥力影响范围
-                pass
-            else:
-                rep += Vector2d(t_vec.direction[0], t_vec.direction[1]) * self.k_rep * (
-                    1.0 / t_vec.length - 1.0 / self.rr) / (t_vec.length ** 2)
-        return rep
+    def attractive_force(self):
+        """引力计算"""
+        delta = self.goal - self.current_pos
+        distance = np.linalg.norm(delta)
+        if distance == 0:
+            return np.zeros(2)
+        return self.k_att * delta
+
+    def repulsive_force(self):
+        """斥力计算 (向量化版本)"""
+        if self.obstacles.size == 0:
+            return np.zeros(2)
+
+        # 计算障碍物到当前位置的向量
+        delta = self.current_pos - self.obstacles
+        distances = np.linalg.norm(delta, axis=1)
+        valid = distances < self.rr
+        valid_distances = distances[valid]
+        valid_delta = delta[valid]
+
+        if valid_distances.size == 0:
+            return np.zeros(2)
+
+        # 斥力分量计算
+        with np.errstate(divide='ignore', invalid='ignore'):
+            direction = valid_delta / valid_distances[:, None]
+            magnitude = self.k_rep * \
+                (1.0/valid_distances - 1.0/self.rr) / (valid_distances**2)
+            forces = direction * magnitude[:, None]
+
+        return np.sum(forces, axis=0)
+
+    def total_force(self):
+        """合力计算"""
+        f_att = self.attractive_force()
+        f_rep = self.repulsive_force()
+        return f_att + f_rep
+
+    def check_goal(self):
+        """检查是否到达目标点"""
+        return np.linalg.norm(self.goal - self.current_pos) <= self.goal_threshold
 
     def path_plan(self):
-        """
-        path plan
-        :return:
-        """
-        while (self.iters < self.max_iters and (self.current_pos - self.goal).length > self.goal_threashold):
-            f_vec = self.attractive() + self.repulsion()
-            self.current_pos += Vector2d(
-                f_vec.direction[0], f_vec.direction[1]) * self.step_size
-            self.iters += 1
-            self.path.append(
-                [self.current_pos.deltaX, self.current_pos.deltaY])
-            if self.is_plot:
-                plt.plot(self.current_pos.deltaX,
-                         self.current_pos.deltaY, '.b')
+        """执行路径规划"""
+        for self.iters in range(1, self.max_iters+1):
+            if self.check_goal():
+                self.is_success = True
+                break
+
+            # 计算运动方向
+            force = self.total_force()
+            norm = np.linalg.norm(force)
+            if norm == 0:
+                break  # 局部最小值
+            direction = force / norm
+
+            # 更新位置
+            self.current_pos += direction * self.step_size
+            self.path[self.iters] = self.current_pos
+
+            # 可视化更新
+            if self.is_plot and self.iters % self.plot_interval == 0:
+                self.ax.plot(*self.current_pos, '.b', markersize=2)
+                self.fig.canvas.draw_idle()
                 plt.pause(self.delta_t)
-        if (self.current_pos - self.goal).length <= self.goal_threashold:
-            self.is_path_plan_success = True
 
-
-"""
-人工势场寻路算法实现
-改进人工势场，解决不可达问题，仍存在局部最小点问题
-"""
-
-
-def check_vec_angle(v1: Vector2d, v2: Vector2d):
-    v1_v2 = v1.deltaX * v2.deltaX + v1.deltaY * v2.deltaY
-    angle = math.acos(v1_v2 / (v1.length * v2.length)) * 180 / math.pi
-    return angle
+        # 裁剪有效路径
+        self.path = self.path[:self.iters]
+        return self.is_success
 
 
 class APF_Improved(APF):
-    def __init__(self, start, goal, obstacles, k_att: float, k_rep: float, rr: float,
-                 step_size: float, max_iters: int, goal_threshold: float, is_plot=False):
-        self.start = Vector2d(start[0], start[1])
-        self.current_pos = Vector2d(start[0], start[1])
-        self.goal = Vector2d(goal[0], goal[1])
-        self.obstacles = [Vector2d(OB[0], OB[1]) for OB in obstacles]
-        self.k_att = k_att
-        self.k_rep = k_rep
-        self.rr = rr  # 斥力作用范围
-        self.step_size = step_size
-        self.max_iters = max_iters
-        self.iters = 0
-        self.goal_threashold = goal_threshold
-        self.path = list()
-        self.is_path_plan_success = False
-        self.is_plot = is_plot
-        self.delta_t = 0.01
+    """改进版人工势场法 (解决目标不可达问题)"""
 
-    def repulsion(self):
-        """
-        斥力计算, 改进斥力函数, 解决不可达问题
-        :return: 斥力大小
-        """
-        rep = Vector2d(0, 0)  # 所有障碍物总斥力
-        for obstacle in self.obstacles:
-            # obstacle = Vector2d(0, 0)
-            obs_to_rob = self.current_pos - obstacle
-            rob_to_goal = self.goal - self.current_pos
-            if (obs_to_rob.length > self.rr):  # 超出障碍物斥力影响范围
-                pass
-            else:
-                rep_1 = Vector2d(obs_to_rob.direction[0], obs_to_rob.direction[1]) * self.k_rep * (
-                    1.0 / obs_to_rob.length - 1.0 / self.rr) / (obs_to_rob.length ** 2) * (rob_to_goal.length ** 2)
-                rep_2 = Vector2d(rob_to_goal.direction[0], rob_to_goal.direction[1]) * self.k_rep * (
-                    (1.0 / obs_to_rob.length - 1.0 / self.rr) ** 2) * rob_to_goal.length
-                rep += (rep_1+rep_2)
-        return rep
+    def repulsive_force(self):
+        """改进斥力计算"""
+        if self.obstacles.size == 0:
+            return np.zeros(2)
+
+        # 计算障碍物到当前位置的向量
+        delta = self.current_pos - self.obstacles
+        distances = np.linalg.norm(delta, axis=1)
+        valid = distances < self.rr
+        valid_distances = distances[valid]
+        valid_delta = delta[valid]
+
+        if valid_distances.size == 0:
+            return np.zeros(2)
+
+        # 目标方向向量
+        goal_direction = self.goal - self.current_pos
+        goal_distance = np.linalg.norm(goal_direction)
+        if goal_distance == 0:
+            return np.zeros(2)
+        goal_dir_norm = goal_direction / goal_distance
+
+        # 斥力分量计算
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # 第一部分斥力
+            direction = valid_delta / valid_distances[:, None]
+            mag_part1 = (1.0/valid_distances - 1.0/self.rr) / \
+                (valid_distances**2)
+            part1 = direction * mag_part1[:, None] * goal_distance**2
+
+            # 第二部分斥力
+            mag_part2 = (1.0/valid_distances - 1.0/self.rr)**2
+            part2 = goal_dir_norm * mag_part2[:, None] * goal_distance
+
+            # 合并斥力
+            forces = (part1 + part2) * self.k_rep
+
+        return np.sum(forces, axis=0)
 
 
-if __name__ == '__main__':
-    # 相关参数设置
-    k_att, k_rep = 1.0, 0.8
-    rr = 3
-    # 步长0.5寻路1000次用时4.37s, 步长0.1寻路1000次用时21s
-    step_size, max_iters, goal_threashold = 0.2, 10000, .2
-    step_size_ = 2
+# 测试用例
+if __name__ == "__main__":
+    # 参数设置
+    start = (437, 735)
+    goal = (1000, 71)
+    obstacles = np.argwhere(test_map() == 1)[:, [1, 0]]
 
-    # 设置、绘制起点终点
-    start, goal = (0, 0), (15, 15)
-    is_plot = True
-    if is_plot:
-        fig = plt.figure(figsize=(7, 7))
-        subplot = fig.add_subplot(111)
-        subplot.set_xlabel('X-distance: m')
-        subplot.set_ylabel('Y-distance: m')
-        subplot.plot(start[0], start[1], '*r')
-        subplot.plot(goal[0], goal[1], '*r')
-    # 障碍物设置及绘制
-    obs = [[1, 4], [2, 4], [3, 3], [6, 1], [6, 7], [10, 6], [11, 12], [14, 14]]
-    print('obstacles: {0}'.format(obs))
+    # 创建路径规划器
+    apf = APF_Improved(
+        start=start,
+        goal=goal,
+        obstacles=obstacles,
+        k_att=1.0,
+        k_rep=0.9,
+        rr=40,
+        step_size=1,
+        max_iters=5000,
+        is_plot=False
+    )
 
-    if is_plot:
-        for OB in obs:
-            circle = Circle(xy=(OB[0], OB[1]), radius=rr, alpha=0.3)
-            subplot.add_patch(circle)
-            subplot.plot(OB[0], OB[1], 'xk')
-    # t1 = time.time()
-    # for i in range(1000):
+    # 执行路径规划
+    start_time = time()
+    success = apf.path_plan()
+    print(f"规划耗时: {time()-start_time:.2f}s")
 
-    # path plan
-    if is_plot:
-        apf = APF_Improved(start, goal, obs, k_att, k_rep,
-                           rr, step_size, max_iters, goal_threashold, is_plot)
-    else:
-        apf = APF_Improved(start, goal, obs, k_att, k_rep,
-                           rr, step_size, max_iters, goal_threashold, is_plot)
-    with timer():
-        apf.path_plan()
-    if apf.is_path_plan_success:
-        path = apf.path
-        path_ = []
-        i = int(step_size_ / step_size)
-        while (i < len(path)):
-            path_.append(path[i])
-            i += int(step_size_ / step_size)
-
-        if path_[-1] != path[-1]:  # 添加最后一个点
-            path_.append(path[-1])
-        print('planed path points:{}'.format(path_))
-        print('path plan success')
-        if is_plot:
-            px, py = [K[0] for K in path_], [K[1]
-                                             for K in path_]  # 路径点x坐标列表, y坐标列表
-            subplot.plot(px, py, '^k')
+    if success:
+        print("路径规划成功!")
+        print(apf.path)
+        if apf.is_plot:
+            apf.ax.plot(apf.path[:, 0], apf.path[:, 1], 'k-', lw=1)
             plt.show()
     else:
-        print('path plan failed')
-    # t2 = time.time()
-    # print('寻路1000次所用时间:{}, 寻路1次所用时间:{}'.format(t2-t1, (t2-t1)/1000))
+        print("路径规划失败!")
