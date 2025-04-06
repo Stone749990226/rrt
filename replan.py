@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from time import time
+from scipy.spatial import KDTree
 
 from config import GLOBAL_CONFIG
 from utils import test_map
@@ -23,6 +24,8 @@ class APF:
         self.start = np.array(start, dtype=np.float32)
         self.goal = np.array(goal, dtype=np.float32)
         self.obstacles = obstacles
+        self.obstacle_tree = KDTree(self.obstacles) if len(
+            self.obstacles) > 0 else None
         self.k_att = k_att
         self.k_rep = k_rep
         self.rr = rr
@@ -67,25 +70,25 @@ class APF:
         return self.k_att * delta
 
     def repulsive_force(self):
-        """斥力计算 (向量化版本)"""
-        if self.obstacles.size == 0:
+        """斥力计算 (KDTree优化版)"""
+        if self.obstacle_tree is None or len(self.obstacles) == 0:
             return np.zeros(2)
 
-        # 计算障碍物到当前位置的向量
-        delta = self.current_pos - self.obstacles
+        # KDTree范围查询
+        indices = self.obstacle_tree.query_ball_point(
+            self.current_pos, self.rr)
+        if not indices:
+            return np.zeros(2)
+
+        near_obstacles = self.obstacles[indices]
+        delta = self.current_pos - near_obstacles
         distances = np.linalg.norm(delta, axis=1)
-        valid = distances < self.rr
-        valid_distances = distances[valid]
-        valid_delta = delta[valid]
 
-        if valid_distances.size == 0:
-            return np.zeros(2)
-
-        # 斥力分量计算
+        # 斥力计算
         with np.errstate(divide='ignore', invalid='ignore'):
-            direction = valid_delta / valid_distances[:, None]
+            direction = delta / distances[:, None]
             magnitude = self.k_rep * \
-                (1.0/valid_distances - 1.0/self.rr) / (valid_distances**2)
+                (1.0/distances - 1.0/self.rr) / (distances**2)
             forces = direction * magnitude[:, None]
 
         return np.sum(forces, axis=0)
@@ -133,37 +136,36 @@ class APF_Improved(APF):
     """改进版人工势场法 (解决目标不可达问题)"""
 
     def repulsive_force(self):
-        """改进斥力计算"""
-        if self.obstacles.size == 0:
+        """改进斥力计算 (KDTree优化版)"""
+        if self.obstacle_tree is None or len(self.obstacles) == 0:
             return np.zeros(2)
 
-        # 计算障碍物到当前位置的向量
-        delta = self.current_pos - self.obstacles
+        # KDTree范围查询
+        indices = self.obstacle_tree.query_ball_point(
+            self.current_pos, self.rr)
+        if not indices:
+            return np.zeros(2)
+
+        near_obstacles = self.obstacles[indices]
+        delta = self.current_pos - near_obstacles
         distances = np.linalg.norm(delta, axis=1)
-        valid = distances < self.rr
-        valid_distances = distances[valid]
-        valid_delta = delta[valid]
 
-        if valid_distances.size == 0:
-            return np.zeros(2)
-
-        # 目标方向向量
+        # 目标方向计算
         goal_direction = self.goal - self.current_pos
         goal_distance = np.linalg.norm(goal_direction)
         if goal_distance == 0:
             return np.zeros(2)
         goal_dir_norm = goal_direction / goal_distance
 
-        # 斥力分量计算
+        # 斥力计算
         with np.errstate(divide='ignore', invalid='ignore'):
             # 第一部分斥力
-            direction = valid_delta / valid_distances[:, None]
-            mag_part1 = (1.0/valid_distances - 1.0/self.rr) / \
-                (valid_distances**2)
+            direction = delta / distances[:, None]
+            mag_part1 = (1.0/distances - 1.0/self.rr) / (distances**2)
             part1 = direction * mag_part1[:, None] * goal_distance**2
 
             # 第二部分斥力
-            mag_part2 = (1.0/valid_distances - 1.0/self.rr)**2
+            mag_part2 = (1.0/distances - 1.0/self.rr)**2
             part2 = goal_dir_norm * mag_part2[:, None] * goal_distance
 
             # 合并斥力
@@ -175,7 +177,7 @@ class APF_Improved(APF):
 # 测试用例
 if __name__ == "__main__":
     # 参数设置
-    start = (437, 735)
+    start = (149, 1604)
     goal = (1000, 71)
     obstacles = np.argwhere(test_map() == 1)[:, [1, 0]]
 
