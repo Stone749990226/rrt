@@ -93,7 +93,7 @@ def get_images_path(start_time, mark_time):
     return res
 
 
-def generate_combined_map(image_files: list, speed, start_point, start_time: str, threshold=0, safety_radius=20):
+def generate_combined_map(image_files: list, speed: int, start_point, start_time: str, threshold=0, safety_radius=1):
     """speed: 每分钟移动的像素格子数"""
     global maps
 
@@ -124,10 +124,10 @@ def generate_combined_map(image_files: list, speed, start_point, start_time: str
         # 读取并处理图像
         t = datetime.strptime(os.path.basename(image_path)[:12], "%Y%m%d%H%M")
         gray_array = np.array(Image.open(image_path).convert('L'))
-        maps[t] = gray_array
+
         # 二值化（注意：根据实际图像情况可能需要调整阈值）
         bin_map = (gray_array > threshold).astype(np.uint8)
-
+        maps[t] = bin_map
         # 构造 annulus 区域的布尔掩码（矢量化）
         annulus_mask = (distance_map >= min_radius)
 
@@ -308,20 +308,17 @@ def bresenham_collision(map_array, start, end) -> bool:
     return False
 
 
-def check_path_collision(path, speed, start_time: datetime | str, animation_flag=False):
-    if isinstance(start_time, str):
-        start_time = datetime.strptime(start_time, "%Y%m%d%H%M")
-    rounded_path = [(round(row), round(col)) for (row, col) in path]
-    if len(rounded_path) < 2:
-        return True
-
+def check_path_collision(path: list, speed: int, start_time: str, animation_flag=False) -> bool:
+    """检查路径是否发生碰撞，如果发生返回true，否则返回发生碰撞的段的起点和终点"""
+    start_time = datetime.strptime(start_time, "%Y%m%d%H%M")
+    if len(path) < 2:
+        return False
+    # 先将路径转换成一个个段（segment），依次检测每个段上是否发生碰撞
     segments = []
-    for i in range(len(rounded_path)-1):
-        start = rounded_path[i]
-        end = rounded_path[i+1]
-        d_row = end[0] - start[0]
-        d_col = end[1] - start[1]
-        distance = np.hypot(d_row, d_col)
+    for i in range(len(path)-1):
+        start = path[i]
+        end = path[i+1]
+        distance = np.hypot((end[0] - start[0]), (end[1] - start[1]))
         segments.append({
             'start': start,
             'end': end,
@@ -331,17 +328,19 @@ def check_path_collision(path, speed, start_time: datetime | str, animation_flag
     total_time = sum(s['time'] for s in segments)
 
     map_times = sorted(maps.keys())
+    # 从起点出发开始计算的相对时间
     elapsed = 0.0
     anim_data = []
     collision_info = None
-
-    for seg in segments:
+    # 依次遍历每一个段
+    for (i, seg) in enumerate(segments):
+        print(f"遍历第 {i} 段 {seg}")
         seg_start_elapsed = elapsed
         seg_end_elapsed = seg_start_elapsed + seg['time']
-
-        while elapsed < seg_end_elapsed:
+        print(f"当前段开始时间: {seg_start_elapsed}, 结束时间: {seg_end_elapsed}")
+        while elapsed < seg_end_elapsed - 1e-6:
+            # 根据当前时间戳查找障碍物地图有效时间段
             current_real_time = start_time + timedelta(minutes=elapsed)
-            # 动态计算当前地图时间
             idx = bisect.bisect_right(map_times, current_real_time) - 1
             if idx < 0 or idx >= len(map_times):
                 print("超出地图时间范围")
@@ -350,7 +349,8 @@ def check_path_collision(path, speed, start_time: datetime | str, animation_flag
             map_start = current_map_time
             map_end = map_start + timedelta(minutes=15)
 
-            # 计算有效时间窗口
+            # 计算当前障碍物地图内有效时间窗口
+            # 取max是为了处理start_time为08:07, map_start为08:00的情况
             window_start = max(map_start, start_time)
             window_end = min(map_end, start_time +
                              timedelta(minutes=seg_end_elapsed))
@@ -379,22 +379,21 @@ def check_path_collision(path, speed, start_time: datetime | str, animation_flag
                     elapsed += (map_end -
                                 current_real_time).total_seconds() / 60
                     continue
-
+            # 一个段可能比较长，跨过多个障碍物地图，所以要对段进行分割找到位于某一个障碍物地图的部分的起点和终点
             time_in_window = min(available, seg_end_elapsed - elapsed)
             ratio_start = (elapsed - seg_start_elapsed) / seg['time']
             ratio_end = ratio_start + time_in_window / seg['time']
-
             part_start = (
-                int(seg['start'][0] + ratio_start *
-                    (seg['end'][0] - seg['start'][0])),
-                int(seg['start'][1] + ratio_start *
-                    (seg['end'][1] - seg['start'][1]))
+                seg['start'][0] + ratio_start *
+                (seg['end'][0] - seg['start'][0]),
+                seg['start'][1] + ratio_start *
+                (seg['end'][1] - seg['start'][1])
             )
             part_end = (
-                int(seg['start'][0] + ratio_end *
-                    (seg['end'][0] - seg['start'][0])),
-                int(seg['start'][1] + ratio_end *
-                    (seg['end'][1] - seg['start'][1]))
+                seg['start'][0] + ratio_end *
+                (seg['end'][0] - seg['start'][0]),
+                seg['start'][1] + ratio_end *
+                (seg['end'][1] - seg['start'][1])
             )
 
             if bresenham_collision(maps[current_map_time], part_start, part_end):
@@ -403,12 +402,13 @@ def check_path_collision(path, speed, start_time: datetime | str, animation_flag
                     'map_time': current_map_time,
                     'position': part_end,
                     'collision_t': collision_time,
-                    'last_safe': anim_data[-1]['end'] if anim_data else part_start
+                    'last_safe': anim_data[-1]['end'] if len(anim_data) > 0 else part_start
                 }
                 if animation_flag:
-                    animate_path(anim_data, maps, rounded_path,
+                    animate_path(anim_data, maps, path,
                                  start_time, collision_info)
-                return False
+                print("路径发生碰撞")
+                return (seg["start"], seg["end"], current_map_time)
 
             anim_data.append({
                 'map_time': current_map_time,
@@ -430,16 +430,15 @@ def check_path_collision(path, speed, start_time: datetime | str, animation_flag
                 return False
 
     if animation_flag:
-        animate_path(anim_data, maps, rounded_path, start_time)
-    return True
+        animate_path(anim_data, maps, path, start_time)
+    return False
 
 
 def animate_path(animation_data, maps, path, start_time, collision_info=None):
     fig, ax = plt.subplots()
     ax.set_aspect('equal')
-    current_map = animation_data[0]['map_time'] if animation_data else list(maps.keys())[
-        0]
-    img = ax.imshow(maps[current_map], cmap='gray', origin='upper')
+    current_map_time = animation_data[0]['map_time'] if animation_data else collision_info['map_time']
+    img = ax.imshow(maps[current_map_time], cmap='gray', origin='upper')
 
     path_rows = [p[0] for p in path]
     path_cols = [p[1] for p in path]
@@ -453,35 +452,36 @@ def animate_path(animation_data, maps, path, start_time, collision_info=None):
     time_text = ax.text(0.05, 0.95, '', transform=ax.transAxes,
                         bbox=dict(facecolor='white', alpha=0.8))
 
-    end_time = collision_info['collision_t'] if collision_info else animation_data[-1]['t_end'] if animation_data else 0
+    end_time = collision_info['collision_t'] if collision_info else animation_data[-1]['t_end']
 
     def update(frame):
-        nonlocal current_map
+        nonlocal current_map_time
         t = frame
-        current_seg = None
-        for seg in animation_data:
-            if seg['t_start'] <= t <= seg['t_end']:
-                current_seg = seg
+        current_part = None
+        for part in animation_data:
+            if part['t_start'] <= t <= part['t_end']:
+                current_part = part
                 break
-        if not current_seg:
-            current_seg = animation_data[-1] if animation_data else None
+        if current_part is None:
+            current_part = animation_data[-1] if animation_data else None
             t = end_time
 
-        if current_seg['map_time'] != current_map:
-            current_map = current_seg['map_time']
-            img.set_data(maps[current_map])
+        if current_part['map_time'] != current_map_time:
+            current_map_time = current_part['map_time']
+            img.set_data(maps[current_map_time])
 
         traj_cols, traj_rows = [], []
-        for seg in animation_data:
-            if seg['t_end'] <= t:
-                traj_cols.extend([seg['start'][1], seg['end'][1]])
-                traj_rows.extend([seg['start'][0], seg['end'][0]])
+        for part in animation_data:
+            if part['t_end'] <= t:
+                traj_cols.extend([part['start'][1], part['end'][1]])
+                traj_rows.extend([part['start'][0], part['end'][0]])
             else:
-                ratio = (t - seg['t_start']) / (seg['t_end'] - seg['t_start'])
-                inter_col = seg['start'][1] + ratio * \
-                    (seg['end'][1]-seg['start'][1])
-                inter_row = seg['start'][0] + ratio * \
-                    (seg['end'][0]-seg['start'][0])
+                ratio = (t - part['t_start']) / \
+                    (part['t_end'] - part['t_start'])
+                inter_col = part['start'][1] + ratio * \
+                    (part['end'][1]-part['start'][1])
+                inter_row = part['start'][0] + ratio * \
+                    (part['end'][0]-part['start'][0])
                 traj_cols.append(inter_col)
                 traj_rows.append(inter_row)
                 break

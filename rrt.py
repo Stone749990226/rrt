@@ -25,21 +25,18 @@ ALGORITHM_CONFIG = AlgorithmConfig()
 
 
 class RRT:
-    def __init__(self, width, height, step_size, end_lim, start: Node, end: Node, speed=6) -> None:
+    def __init__(self, start: Node, end: Node, width=GLOBAL_CONFIG["width"], height=GLOBAL_CONFIG["height"], step_size=GLOBAL_CONFIG["step_size"], end_lim=GLOBAL_CONFIG["end_lim"],  speed=6, animation=False) -> None:
         np.random.seed(42)
         self.t_iter_begin = time.time()
-        # initial map & window
         self.height = height
         self.width = width
-        # initial extend limitation and ede limitation
         self.step_size = step_size
         self.end_lim = end_lim
         self.speed = speed
         self.start = start
         self.end = end
-        self.col_map = np.zeros([self.height, self.width])
+        self.col_map = None
         self.obstacle_kdtree = None
-        # node list
         # start_tree 和 end_tree 是分别从起点和终点开始生长的两棵 RRT* 树
         self.start_tree = [self.start]
         if ALGORITHM_CONFIG.bidirectional:
@@ -54,8 +51,8 @@ class RRT:
             'max_step_ratio': 1.5,
             'min_step_ratio': 0.5
         }
-
-        if GLOBAL_CONFIG["animation"]:
+        self.animation = animation
+        if self.animation:
             self.fig, self.ax = plt.subplots(figsize=(12, 7))
             self.ax.set_xlim(0, self.width)
             self.ax.set_ylim(0, self.height)
@@ -161,7 +158,7 @@ class RRT:
             obstacle_points = np.column_stack(np.where(binary_map == 1))
             self.obstacle_kdtree = cKDTree(obstacle_points)
 
-        if GLOBAL_CONFIG["animation"]:
+        if self.animation:
             # 获取障碍物的位置并绘制
             obstacle_positions = np.column_stack(np.where(binary_map == 1))
             self.obs_scatter.set_offsets(obstacle_positions[:, [1, 0]])
@@ -266,7 +263,7 @@ class RRT:
                 self.start_tree, self.end_tree = self.end_tree, self.start_tree
             return None
 
-        if GLOBAL_CONFIG["animation"]:
+        if self.animation:
             if tree_index == 1:
                 color = 'gray'
             elif tree_index == 2:
@@ -353,7 +350,7 @@ class RRT:
                         self.start_tree, self.end_tree = self.end_tree, self.start_tree
                     return False
 
-                if GLOBAL_CONFIG["animation"]:
+                if self.animation:
                     rect = patches.Rectangle(
                         # (x, y), 宽度, 高度
                         (new_node3.col - 2, new_node3.row - 2), 4, 4,
@@ -409,7 +406,7 @@ class RRT:
                     self.path = self.results(temp)
                     break
 
-        if GLOBAL_CONFIG["animation"]:
+        if self.animation:
             self.ax.plot([temp[0].col, temp[1].col], [temp[0].row,
                                                       temp[1].row], color='black', linewidth=1)
             self.fig.canvas.draw()
@@ -435,7 +432,7 @@ class RRT:
             self.less_long_path = self.path_length
             self.path_all.append(self.path)
 
-            if GLOBAL_CONFIG["animation"]:
+            if self.animation:
                 self.draw_path()
 
     def draw_path(self):
@@ -499,7 +496,7 @@ class RRT:
             logging.info("起点和终点的连线没有障碍物，可以直接通行")
             self.path = [self.start, self.end]
             self.path_all = [[self.start, self.end]]
-            if GLOBAL_CONFIG["animation"]:
+            if self.animation:
                 self.draw_path()
         else:
             self.t_search_begin = time.time()
@@ -529,7 +526,7 @@ class RRT:
             self.path_final.append([i.row, i.col])
         self.path_final = insert_intermediate_points(
             self.path_final, self.speed * 15)
-        if GLOBAL_CONFIG["animation"]:
+        if self.animation:
             x_vals = [point[0] for point in self.path_final]
             y_vals = [point[1] for point in self.path_final]
             print("绘制途经点")
@@ -737,20 +734,21 @@ def test_rrt_with_config(n=20, configs=None):
 
 if __name__ == "__main__":
     # test_rrt_with_config(30)
-    start_time = "202411130728"
+    start_time = "202411130715"
     mark_time = "202411130715"
-
+    start = (149, 1604)
+    goal = (88, 1813)
     speed = 4
-    rrt_agent = RRT(GLOBAL_CONFIG["width"], GLOBAL_CONFIG["height"],
-                    GLOBAL_CONFIG["step_size"], GLOBAL_CONFIG["end_lim"], Node(149, 1604), Node(88, 1813))
+    rrt_agent = RRT(Node(*start), Node(*goal), speed=speed,
+                    animation=GLOBAL_CONFIG["animation"])
     png_paths = get_images_path(start_time, mark_time)
-    rrt_agent.set_col_map(generate_combined_map(
-        png_paths, speed=speed, start_point=(149, 1604), start_time=start_time))
-    # plt.show()
+    combined_map = generate_combined_map(png_paths, speed, start, start_time)
+    rrt_agent.set_col_map(combined_map)
+    plt.show()
     # profiler = cProfile.Profile()
     # profiler.enable()  # 开始性能分析
     # rrt_agent.search_path()
-    plt.show()
+    # plt.show()
     # profiler.disable()
     # profiler.print_stats(sort="time")  # 输出性能分析结果
     # plt.pause(100)
