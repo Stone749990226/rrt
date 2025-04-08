@@ -6,3 +6,4 @@ rrt_config.yaml
 *.gif
 path_planning.tar
 build/
+result_*

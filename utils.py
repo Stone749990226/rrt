@@ -197,30 +197,7 @@ def has_collision(col_map, node1: Node, node2: Node, method="bresenham") -> bool
     if col_map[x0][y0] > 0 or col_map[x1][y1] > 0:
         return True
 
-    if method == "bresenham":
-        # Bresenham算法实现
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-
-        current_x, current_y = x0, y0
-        while True:
-            if col_map[current_x][current_y] > 0:
-                return True
-            if current_x == x1 and current_y == y1:
-                break
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                current_x += sx
-            if e2 < dx:
-                err += dx
-                current_y += sy
-        return False
-
-    elif method == "discrete":
+    if method == "discrete":
         # 离散点采样法实现
         dx = x1 - x0
         dy = y1 - y0
@@ -243,9 +220,28 @@ def has_collision(col_map, node1: Node, node2: Node, method="bresenham") -> bool
             if col_map[xi][yi] > 0:
                 return True
         return False
-
     else:
-        raise ValueError("Invalid collision check method. Choose 'bresenham' or 'discrete'")
+        # Bresenham算法实现
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        current_x, current_y = x0, y0
+        while True:
+            if col_map[current_x][current_y] > 0:
+                return True
+            if current_x == x1 and current_y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                current_x += sx
+            if e2 < dx:
+                err += dx
+                current_y += sy
+        return False
 
 
 def get_wh(image_path: str):
