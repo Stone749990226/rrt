@@ -15,10 +15,8 @@ class Env:
     def __init__(self):
         self.x_range = GLOBAL_CONFIG["width"]
         self.y_range = GLOBAL_CONFIG["height"]
-        self.motions = [(-1, 0), (-1, 1), (0, 1), (1, 1),
-                        (1, 0), (1, -1), (0, -1), (-1, -1)]
-        self.obs = {(i, j) for i, row in enumerate(utils.test_map())
-                    for j, val in enumerate(row) if val == 1}
+        self.motions = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
+        self.obs = {(i, j) for i, row in enumerate(utils.test_map()) for j, val in enumerate(row) if val == 1}
 
     def update_obs(self, obs):
         self.obs = obs
@@ -31,8 +29,7 @@ ENV = Env()
 
 
 class AStar:
-    """AStar set the cost + heuristics as the priority
-    """
+    """AStar set the cost + heuristics as the priority"""
 
     def __init__(self, s_start, s_goal, heuristic_type):
         self.s_start = s_start
@@ -58,8 +55,7 @@ class AStar:
         self.PARENT[self.s_start] = self.s_start
         self.g[self.s_start] = 0
         self.g[self.s_goal] = math.inf
-        heapq.heappush(self.OPEN,
-                       (self.f_value(self.s_start), self.s_start))
+        heapq.heappush(self.OPEN, (self.f_value(self.s_start), self.s_start))
 
         while self.OPEN:
             _, s = heapq.heappop(self.OPEN)
@@ -113,8 +109,7 @@ class AStar:
         PARENT = {s_start: s_start}
         OPEN = []
         CLOSED = []
-        heapq.heappush(OPEN,
-                       (g[s_start] + e * self.heuristic(s_start), s_start))
+        heapq.heappush(OPEN, (g[s_start] + e * self.heuristic(s_start), s_start))
 
         while OPEN:
             _, s = heapq.heappop(OPEN)
@@ -132,8 +127,7 @@ class AStar:
                 if new_cost < g[s_n]:  # conditions for updating Cost
                     g[s_n] = new_cost
                     PARENT[s_n] = s
-                    heapq.heappush(
-                        OPEN, (g[s_n] + e * self.heuristic(s_n), s_n))
+                    heapq.heappush(OPEN, (g[s_n] + e * self.heuristic(s_n), s_n))
 
         return self.extract_path(PARENT), CLOSED
 
@@ -278,10 +272,8 @@ class BidirectionalAStar:
         self.g_back[self.s_start] = math.inf
         self.PARENT_fore[self.s_start] = self.s_start
         self.PARENT_back[self.s_goal] = self.s_goal
-        heapq.heappush(self.OPEN_fore,
-                       (self.f_value_fore(self.s_start), self.s_start))
-        heapq.heappush(self.OPEN_back,
-                       (self.f_value_back(self.s_goal), self.s_goal))
+        heapq.heappush(self.OPEN_fore, (self.f_value_fore(self.s_start), self.s_start))
+        heapq.heappush(self.OPEN_back, (self.f_value_back(self.s_goal), self.s_goal))
 
     def searching(self):
         """
@@ -311,8 +303,7 @@ class BidirectionalAStar:
                 if new_cost < self.g_fore[s_n]:
                     self.g_fore[s_n] = new_cost
                     self.PARENT_fore[s_n] = s_fore
-                    heapq.heappush(self.OPEN_fore,
-                                   (self.f_value_fore(s_n), s_n))
+                    heapq.heappush(self.OPEN_fore, (self.f_value_fore(s_n), s_n))
 
             # solve backward-search
             _, s_back = heapq.heappop(self.OPEN_back)
@@ -332,8 +323,7 @@ class BidirectionalAStar:
                 if new_cost < self.g_back[s_n]:
                     self.g_back[s_n] = new_cost
                     self.PARENT_back[s_n] = s_back
-                    heapq.heappush(self.OPEN_back,
-                                   (self.f_value_back(s_n), s_n))
+                    heapq.heappush(self.OPEN_back, (self.f_value_back(s_n), s_n))
 
         return self.extract_path(s_meet), self.CLOSED_fore, self.CLOSED_back
 
@@ -448,8 +438,7 @@ class BidirectionalAStar:
 
 
 class BestFirst(AStar):
-    """BestFirst set the heuristics as the priority 
-    """
+    """BestFirst set the heuristics as the priority"""
 
     def searching(self):
         """
@@ -460,8 +449,7 @@ class BestFirst(AStar):
         self.PARENT[self.s_start] = self.s_start
         self.g[self.s_start] = 0
         self.g[self.s_goal] = math.inf
-        heapq.heappush(self.OPEN,
-                       (self.heuristic(self.s_start), self.s_start))
+        heapq.heappush(self.OPEN, (self.heuristic(self.s_start), self.s_start))
 
         while self.OPEN:
             _, s = heapq.heappop(self.OPEN)
@@ -495,7 +483,7 @@ class Plotting:
         self.ax.set_xlim(0, GLOBAL_CONFIG["width"])
         self.ax.set_ylim(0, GLOBAL_CONFIG["height"])
         self.ax.invert_yaxis()
-        self.ax.set_aspect('equal')
+        self.ax.set_aspect("equal")
 
     def update_obs(self, obs):
         self.obs = obs
@@ -542,14 +530,13 @@ class Plotting:
     def plot_grid(self, name):
         obs_x = [x[1] for x in self.obs]
         obs_y = [x[0] for x in self.obs]
-        self.ax.scatter(
-            obs_x, obs_y, c='black', s=1, zorder=1)
+        self.ax.scatter(obs_x, obs_y, c="black", s=1, zorder=1)
         plt.plot(self.xI[0], self.xI[1], "bs")
         plt.plot(self.xG[0], self.xG[1], "gs")
         # plt.plot(obs_x, obs_y, "sk")
         plt.title(name)
 
-    def plot_visited(self, visited, cl='gray'):
+    def plot_visited(self, visited, cl="gray"):
         if self.xI in visited:
             visited.remove(self.xI)
 
@@ -560,9 +547,8 @@ class Plotting:
 
         for x in visited:
             count += 1
-            plt.plot(x[0], x[1], color=cl, marker='o')
-            plt.gcf().canvas.mpl_connect('key_release_event',
-                                         lambda event: [exit(0) if event.key == 'escape' else None])
+            plt.plot(x[0], x[1], color=cl, marker="o")
+            plt.gcf().canvas.mpl_connect("key_release_event", lambda event: [exit(0) if event.key == "escape" else None])
 
             if count < len(visited) / 3:
                 length = 20
@@ -577,14 +563,14 @@ class Plotting:
                 plt.pause(0.001)
         plt.pause(0.01)
 
-    def plot_path(self, path, cl='r', flag=False):
+    def plot_path(self, path, cl="r", flag=False):
         path_x = [path[i][1] for i in range(len(path))]
         path_y = [path[i][0] for i in range(len(path))]
 
         if not flag:
-            plt.plot(path_x, path_y, linewidth='1', color='r')
+            plt.plot(path_x, path_y, linewidth="1", color="r")
         else:
-            plt.plot(path_x, path_y, linewidth='1', color=cl)
+            plt.plot(path_x, path_y, linewidth="1", color=cl)
 
         plt.plot(self.xI[1], self.xI[0], "bs")
         plt.plot(self.xG[1], self.xG[0], "gs")
@@ -602,14 +588,11 @@ class Plotting:
 
         for k in range(max(len_fore, len_back)):
             if k < len_fore:
-                plt.plot(v_fore[k][0], v_fore[k][1],
-                         linewidth='3', color='gray', marker='o')
+                plt.plot(v_fore[k][0], v_fore[k][1], linewidth="3", color="gray", marker="o")
             if k < len_back:
-                plt.plot(v_back[k][0], v_back[k][1], linewidth='3',
-                         color='cornflowerblue', marker='o')
+                plt.plot(v_back[k][0], v_back[k][1], linewidth="3", color="cornflowerblue", marker="o")
 
-            plt.gcf().canvas.mpl_connect('key_release_event',
-                                         lambda event: [exit(0) if event.key == 'escape' else None])
+            plt.gcf().canvas.mpl_connect("key_release_event", lambda event: [exit(0) if event.key == "escape" else None])
 
             if k % 10 == 0:
                 plt.pause(0.001)
@@ -617,35 +600,28 @@ class Plotting:
 
     @staticmethod
     def color_list():
-        cl_v = ['silver',
-                'wheat',
-                'lightskyblue',
-                'royalblue',
-                'slategray']
-        cl_p = ['gray',
-                'orange',
-                'deepskyblue',
-                'red',
-                'm']
+        cl_v = ["silver", "wheat", "lightskyblue", "royalblue", "slategray"]
+        cl_p = ["gray", "orange", "deepskyblue", "red", "m"]
         return cl_v, cl_p
 
     @staticmethod
     def color_list_2():
-        cl = ['silver',
-              'steelblue',
-              'dimgray',
-              'cornflowerblue',
-              'dodgerblue',
-              'royalblue',
-              'plum',
-              'mediumslateblue',
-              'mediumpurple',
-              'blueviolet',
-              ]
+        cl = [
+            "silver",
+            "steelblue",
+            "dimgray",
+            "cornflowerblue",
+            "dodgerblue",
+            "royalblue",
+            "plum",
+            "mediumslateblue",
+            "mediumpurple",
+            "blueviolet",
+        ]
         return cl
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     start = (149, 1604)
     goal = (1000, 71)
     plot = Plotting(start, goal)
@@ -665,7 +641,7 @@ if __name__ == '__main__':
     # plt.pause(10000)
 
     with utils.timer():
-        bf = BestFirst(start, goal, 'euclidean')
+        bf = BestFirst(start, goal, "euclidean")
         path, visited = bf.searching()
 
     plot.plot_grid("BestFirst")

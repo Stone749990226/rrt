@@ -10,7 +10,7 @@ GLOBAL_CONFIG = {
     "animation": True,
     "rewire": False,
     "image_path": "/data/ImageData/",
-    "env_mode": "local"
+    "env_mode": "local",
 }
 
 

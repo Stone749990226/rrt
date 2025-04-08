@@ -10,8 +10,8 @@ from utils import Node, bresenham_collision, check_path_collision, generate_comb
 if __name__ == "__main__":
     start_time = "202411130715"
     mark_time = "202411130715"
-    start = (709, 1149)
-    goal = (775, 1273)
+    start = (838, 1306)
+    goal = (926, 1630)
     speed = 4
     rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=False)
     png_paths = get_images_path(start_time, mark_time)
@@ -38,9 +38,10 @@ if __name__ == "__main__":
         apf.path_plan()
 
         i = path.index(collision_start)
-        print(path[i+2:])
-        new_path = np.array(path[:i] + list(apf.path) + path[i+2:])
-        print(new_path)
-        if apf.is_plot:
-            apf.ax.plot(new_path[:, 1], new_path[:, 0], 'k-', lw=1)
-            plt.show()
+        path = np.array(path[:i] + list(apf.path) + path[i+2:])
+        print(path)
+        # if apf.is_plot:
+        #     apf.ax.plot(path[:, 1], path[:, 0], 'k-', lw=1)
+        #     plt.show()
+    check_path_collision(
+        path, speed, start_time, animation_flag=True)
