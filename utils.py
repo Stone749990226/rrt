@@ -21,28 +21,6 @@ maps = {}
 lookup_table = np.load("cloud_look_up_table_v2.npy")
 
 
-class Node:
-    """each node has varieties:row,col,parent"""
-
-    def __init__(self, r=0, c=0, f=None):
-        self.row = r
-        self.col = c
-        self.parent = f
-        self.distance = 0
-        parent = self.parent
-        # 如果路径发生了变动时（例如，节点可能会被修改或重连），循环计算distance才比较准确。
-        while True:
-            if parent == None:
-                break
-            self.distance += np.sqrt((r - parent.row) ** 2 + (c - parent.col) ** 2)
-            r = parent.row
-            c = parent.col
-            parent = parent.parent
-
-    def __str__(self):
-        return f"({self.row}, {self.col})"
-
-
 def align_time_15m(time_str: str):
     time_obj = datetime.strptime(time_str, "%Y%m%d%H%M")
     aligned_time = time_obj.replace(minute=(time_obj.minute // 15) * 15, second=0, microsecond=0)
@@ -182,66 +160,6 @@ def insert_intermediate_points(path, threshold_distance):
         new_path.append(p2)
 
     return new_path
-
-
-def has_collision(col_map, node1: Node, node2: Node, method="bresenham") -> bool:
-    """带方法选择的碰撞检测函数
-    Parameters:
-        method: 'bresenham' - 使用Bresenham算法（默认）
-                'discrete'  - 使用离散点采样法
-    """
-    x0, y0 = int(node1.row), int(node1.col)
-    x1, y1 = int(node2.row), int(node2.col)
-
-    # 公共预处理：检查起点终点自身是否在障碍物
-    if col_map[x0][y0] > 0 or col_map[x1][y1] > 0:
-        return True
-
-    if method == "discrete":
-        # 离散点采样法实现
-        dx = x1 - x0
-        dy = y1 - y0
-        distance = math.hypot(dx, dy)
-
-        if distance == 0:
-            return False
-
-        # 动态计算采样步长（至少1像素）
-        step_size = max(1, int(distance / 1000))
-        steps = int(distance / step_size) + 1
-
-        for i in range(steps + 1):
-            ratio = i / steps
-            x = x0 + dx * ratio
-            y = y0 + dy * ratio
-            # 四舍五入取整并确保在边界内
-            xi = min(max(round(x), 0), col_map.shape[0] - 1)
-            yi = min(max(round(y), 0), col_map.shape[1] - 1)
-            if col_map[xi][yi] > 0:
-                return True
-        return False
-    else:
-        # Bresenham算法实现
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-
-        current_x, current_y = x0, y0
-        while True:
-            if col_map[current_x][current_y] > 0:
-                return True
-            if current_x == x1 and current_y == y1:
-                break
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                current_x += sx
-            if e2 < dx:
-                err += dx
-                current_y += sy
-        return False
 
 
 def get_wh(image_path: str):

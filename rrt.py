@@ -7,7 +7,7 @@ import time
 from typing import Tuple
 from matplotlib import patches, pyplot as plt
 from matplotlib.widgets import Button
-from utils import Node, check_path_collision, generate_combined_map, get_images_path, has_collision, insert_intermediate_points
+from utils import check_path_collision, generate_combined_map, get_images_path, insert_intermediate_points
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -24,6 +24,28 @@ class AlgorithmConfig:
 
 
 ALGORITHM_CONFIG = AlgorithmConfig()
+
+
+class Node:
+    """each node has varieties:row,col,parent"""
+
+    def __init__(self, r=0, c=0, f=None):
+        self.row = r
+        self.col = c
+        self.parent = f
+        self.distance = 0
+        parent = self.parent
+        # 如果路径发生了变动时（例如，节点可能会被修改或重连），循环计算distance才比较准确。
+        while True:
+            if parent == None:
+                break
+            self.distance += np.sqrt((r - parent.row) ** 2 + (c - parent.col) ** 2)
+            r = parent.row
+            c = parent.col
+            parent = parent.parent
+
+    def __str__(self):
+        return f"({self.row}, {self.col})"
 
 
 class RRT:
@@ -50,14 +72,11 @@ class RRT:
         # 障碍物地图（0-1 numpy二维数组）
         self.col_map = None
 
-        # 截止本次iter的最短路径长度
-        self.less_long_path = np.inf
-        # 上一次路径长度，如果变化小于设定值，则认为路径收敛
-        self.last_path_length = np.inf
-        self.path_all = []
-
         # start_tree 和 end_tree 是分别从起点和终点开始生长的两棵 RRT* 树
-        self.start_tree = [self.start]
+        if start:
+            self.set_start(start.row, start.col)
+        if end:
+            self.set_end(end.row, end.col)
         if ALGORITHM_CONFIG.bidirectional:
             self.end_tree = [self.end]
         if ALGORITHM_CONFIG.adaptive_step:
@@ -91,7 +110,16 @@ class RRT:
     def set_end(self, end_row, end_col):
         """设置终点"""
         self.end = Node(end_row, end_col)
-        self.end_tree = [self.end]
+        if ALGORITHM_CONFIG.bidirectional:
+            self.end_tree = [self.end]
+        if ALGORITHM_CONFIG.heuristic:
+            self.cMin = math.sqrt((self.start.row - self.end.row) ** 2 + (self.start.col - self.end.col) ** 2)
+            self.center = ((self.start.row + self.end.row) / 2.0, (self.start.col + self.end.col) / 2.0)
+            dx = self.end.row - self.start.row
+            dy = self.end.col - self.start.col
+            theta = math.atan2(dy, dx)
+            self.cos_theta = math.cos(theta)
+            self.sin_theta = math.sin(theta)
 
     def on_button_set_points_clicked(self, event):
         print("Click on the plot to set the start and end point.")
@@ -165,25 +193,19 @@ class RRT:
     def sample(self, informed_sample_flag: bool):
         if not informed_sample_flag or not ALGORITHM_CONFIG.heuristic:
             return self.random_sample()
-        cMin = math.sqrt((self.start.row - self.end.row) ** 2 + (self.start.col - self.end.col) ** 2)
-        cMax = self.less_long_path
 
+        cMax = self.less_long_path
+        cMin = self.cMin
         if cMax == np.inf or abs(cMax - cMin) < 50:
             # 如果尚未找到路径，退化为全图随机采样
             return self.random_sample()
 
         # 椭圆参数计算
         a = cMax / 2.0
-        b = math.sqrt(cMax**2 - cMin**2 + 1e-6) / 2.0
+        b = math.sqrt(cMax**2 - cMin**2 + 1e-4) / 2.0
 
         # 椭圆中心（中点）
-        center_r = (self.start.row + self.end.row) / 2.0
-        center_c = (self.start.col + self.end.col) / 2.0
-
-        # 计算旋转角度（从起点指向终点的方向）
-        dx = self.end.row - self.start.row
-        dy = self.end.col - self.start.col
-        theta = math.atan2(dy, dx)
+        (center_r, center_c) = self.center
 
         # 在单位圆内生成均匀分布的随机点
         r = np.random.random()  # sqrt确保均匀分布
@@ -192,8 +214,8 @@ class RRT:
         y = r * math.sin(angle)
 
         # 应用椭圆变换（旋转+缩放+平移）
-        x_rot = x * a * math.cos(theta) - y * b * math.sin(theta)
-        y_rot = x * a * math.sin(theta) + y * b * math.cos(theta)
+        x_rot = x * a * self.cos_theta - y * b * self.sin_theta
+        y_rot = x * a * self.sin_theta + y * b * self.cos_theta
 
         new_r = x_rot + center_r
         new_c = y_rot + center_c
@@ -450,6 +472,11 @@ class RRT:
             return nearest_to_goal, self.end  # 返回最近节点和终点
 
     def search_path(self, iternation=GLOBAL_CONFIG["iteration"]):
+        # 截止本次iter的最短路径长度
+        self.less_long_path = np.inf
+        # 上一次路径长度，如果变化小于设定值，则认为路径收敛
+        self.last_path_length = np.inf
+        self.path_all = []
         print("*" * 5, f"search path from start {self.start} to end {self.end}", "*" * 5)
         if not has_collision(self.col_map, self.start, self.end):
             logging.info("起点和终点的连线没有障碍物，可以直接通行")
@@ -559,7 +586,8 @@ class RRT:
     def update_path(self):
         # node list
         self.start_tree = [self.start]
-        self.end_tree = [self.end]
+        if ALGORITHM_CONFIG.bidirectional:
+            self.end_tree = [self.end]
         self.extend(informed_sample_flag=True)
 
     def print_path(self):
@@ -568,6 +596,66 @@ class RRT:
             for point in self.path:
                 print(point, end=",")
             print("]")
+
+
+def has_collision(col_map, node1: Node, node2: Node, method="bresenham") -> bool:
+    """带方法选择的碰撞检测函数
+    Parameters:
+        method: 'bresenham' - 使用Bresenham算法（默认）
+                'discrete'  - 使用离散点采样法
+    """
+    x0, y0 = int(node1.row), int(node1.col)
+    x1, y1 = int(node2.row), int(node2.col)
+
+    # 公共预处理：检查起点终点自身是否在障碍物
+    if col_map[x0][y0] > 0 or col_map[x1][y1] > 0:
+        return True
+
+    if method == "discrete":
+        # 离散点采样法实现
+        dx = x1 - x0
+        dy = y1 - y0
+        distance = math.hypot(dx, dy)
+
+        if distance == 0:
+            return False
+
+        # 动态计算采样步长（至少1像素）
+        step_size = max(1, int(distance / 1000))
+        steps = int(distance / step_size) + 1
+
+        for i in range(steps + 1):
+            ratio = i / steps
+            x = x0 + dx * ratio
+            y = y0 + dy * ratio
+            # 四舍五入取整并确保在边界内
+            xi = min(max(round(x), 0), col_map.shape[0] - 1)
+            yi = min(max(round(y), 0), col_map.shape[1] - 1)
+            if col_map[xi][yi] > 0:
+                return True
+        return False
+    else:
+        # Bresenham算法实现
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        current_x, current_y = x0, y0
+        while True:
+            if col_map[current_x][current_y] > 0:
+                return True
+            if current_x == x1 and current_y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                current_x += sx
+            if e2 < dx:
+                err += dx
+                current_y += sy
+        return False
 
 
 def test_rrt_with_config(n=20, configs=None):
@@ -616,17 +704,21 @@ def test_rrt_with_config(n=20, configs=None):
         success = 0
         total_time = 0
         path_lengths = []
+
+        ALGORITHM_CONFIG = cfg[1]
+        # 开始性能分析
         profiler = cProfile.Profile()
-        profiler.enable()  # 开始性能分析
+        profiler.enable()
+        rrt = RRT(
+            start=None,
+            end=None,
+        )
+        rrt.set_col_map(col_map)
         for start, end in test_cases:
             start_node = Node(start[0], start[1])
             end_node = Node(end[0], end[1])
-            ALGORITHM_CONFIG = cfg[1]
-            rrt = RRT(
-                start=start_node,
-                end=end_node,
-            )
-            rrt.set_col_map(col_map)
+            rrt.set_start(start_node.row, start_node.col)
+            rrt.set_end(end_node.row, end_node.col)
             try:
                 start_time = time.time()
                 path = rrt.search_path()
@@ -658,13 +750,13 @@ def test_rrt_with_config(n=20, configs=None):
 
     for name in results.keys():
         data = results[name]
-        print("{:<20} {:<15.2%} {:<15.2f} {:<15.2f}".format(name, data["success_rate"], data["avg_time"], data["avg_length"]))
+        print("{:<20} {:<15.2%} {:<15.6f} {:<15.6f}".format(name, data["success_rate"], data["avg_time"], data["avg_length"]))
 
     return results
 
 
 if __name__ == "__main__":
-    test_rrt_with_config(30)
+    test_rrt_with_config(100)
     # start_time = "202411130715"
     # mark_time = "202411130715"
     # start = (149, 1604)

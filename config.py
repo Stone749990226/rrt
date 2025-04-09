@@ -2,7 +2,7 @@
 GLOBAL_CONFIG = {
     "height": 1060,
     "width": 1824,
-    "iteration": 30,
+    "iteration": 1,
     "step_size": 50,
     "end_lim": 50,
     "max_iter_time": 10,
