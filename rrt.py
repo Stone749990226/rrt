@@ -80,7 +80,8 @@ class RRT:
         if ALGORITHM_CONFIG.bidirectional:
             self.end_tree = [self.end]
         if ALGORITHM_CONFIG.adaptive_step:
-            self.adaptive_params = {"density_radius": 30, "max_step_ratio": 1.5, "min_step_ratio": 0.5}
+            self.adaptive_params = {"density_radius": 250, "max_step_ratio": 1.3, "min_step_ratio": 0.5}
+            self.obstacle_count_max = 1000
             self.obstacle_kdtree = None
 
         self.animation = animation
@@ -157,13 +158,12 @@ class RRT:
 
     def calculate_step_size(self, node):
         """计算自适应步长"""
-        pos = np.array([node.row, node.col])
         # 查找给定点周围指定半径内的所有点的索引
-        count = self.obstacle_kdtree.query_ball_point(pos, r=self.adaptive_params["density_radius"], return_length=True)
+        count = self.obstacle_kdtree.query_ball_point(np.array([node.row, node.col]), r=self.adaptive_params["density_radius"], return_length=True)
         # print("周围有 %d 个障碍物" % count)
         if count == 0:
             adaptive_step = self.step_size * self.adaptive_params["max_step_ratio"]
-        elif 0 < count < 5:
+        elif 0 < count < self.obstacle_count_max:
             adaptive_step = self.step_size
         else:
             adaptive_step = self.step_size * self.adaptive_params["min_step_ratio"]
@@ -316,14 +316,18 @@ class RRT:
         else:
             while True:
                 distance = np.sqrt((new_node2.col - new_node.col) ** 2 + (new_node2.row - new_node.row) ** 2)
+                if ALGORITHM_CONFIG.adaptive_step:
+                    adaptive_step = self.calculate_step_size(new_node2)
+                else:
+                    adaptive_step = self.step_size
                 # 生成 new_node3（介于 new_node2 和 new_node 之间的新节点）
-                if distance <= self.step_size:
+                if distance <= adaptive_step:
                     # 如果 distance 小于 step_size，直接连上 new_node
                     new_node3 = Node(new_node.row, new_node.col, new_node2)
                 else:
                     # 否则，沿着 new_node2 → new_node 方向前进一步
-                    add_row = (new_node.row - new_node2.row) * self.step_size / distance + new_node2.row
-                    add_col = (new_node.col - new_node2.col) * self.step_size / distance + new_node2.col
+                    add_row = (new_node.row - new_node2.row) * adaptive_step / distance + new_node2.row
+                    add_col = (new_node.col - new_node2.col) * adaptive_step / distance + new_node2.col
                     new_node3 = Node(add_row, add_col, new_node2)
 
                 # check collision the second time: whether the path is in the collision!
@@ -543,44 +547,30 @@ class RRT:
     # when make it, go back to find the relavently low cost path
     # 从 end_limitation 选出的两个连接点出发，回溯出一条完整的路径，并进行优化
     def results(self, temp_all):
-        if ALGORITHM_CONFIG.bidirectional:
-            # create the path list from start node to temp_all[0]
-            temp = temp_all[0]
-            res2 = []
-            res2.append(temp)
-            while temp != self.start:
-                temp = temp.parent
-                res2.append(temp)
-            # reverse the results
-            res = []
-            l = len(res2) - 1
-            for i in range(len(res2)):
-                count = l - i
-                res.append(res2[count])
+        def trace_path(node: Node, target: Node) -> list[Node]:
+            """回溯路径"""
+            path = []
+            current = node
+            while current != target:
+                path.append(current)
+                current = current.parent
+            path.append(target)  # 确保包含终点
+            return path
 
-            # create the path list from temp_all[1] to end node
-            temp = temp_all[1]
-            res.append(temp)
-            while temp != self.end:
-                temp = temp.parent
-                res.append(temp)
-            # return the full path
-            res = self.optim_path(res)
-            return res
+        if ALGORITHM_CONFIG.bidirectional:
+            path = trace_path(temp_all[0], self.start)[::-1] + trace_path(temp_all[1], self.end)
         else:
             # 单向模式路径生成
             nearest_node, _ = temp_all
-            path = []
+            path = [self.end]
             # 从最近节点回溯到起点
             node = nearest_node
             while node.parent:
                 path.append(node)
                 node = node.parent
-            path.reverse()
-            # 添加终点
-            path.append(self.end)
-            res = self.optim_path(path)
-            return res
+            path = path[::-1]
+        # return self.optim_path(path)
+        return path
 
     # draw arcs to find the better path
     def update_path(self):
@@ -762,11 +752,13 @@ if __name__ == "__main__":
     # start = (149, 1604)
     # goal = (88, 1813)
     # speed = 4
+    # ALGORITHM_CONFIG = AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")
     # rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=GLOBAL_CONFIG["animation"])
     # png_paths = get_images_path(start_time, mark_time)
     # combined_map = generate_combined_map(png_paths, speed, start, start_time)
     # rrt_agent.set_col_map(combined_map)
     # plt.show()
+
     # profiler = cProfile.Profile()
     # profiler.enable()  # 开始性能分析
     # rrt_agent.search_path()
