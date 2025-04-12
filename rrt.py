@@ -746,7 +746,7 @@ def test_rrt_with_config(n=20, configs=None):
 
 
 if __name__ == "__main__":
-    test_rrt_with_config(100)
+    test_rrt_with_config(1000)
     # start_time = "202411130715"
     # mark_time = "202411130715"
     # start = (149, 1604)
