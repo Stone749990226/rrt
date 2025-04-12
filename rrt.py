@@ -16,7 +16,7 @@ import utils
 
 
 class AlgorithmConfig:
-    def __init__(self, heuristic: bool = False, bidirectional: bool = True, adaptive_step: bool = False, collision_method: str = "bresenham"):
+    def __init__(self, heuristic=False, bidirectional=True, adaptive_step=False, collision_method="bresenham"):
         self.heuristic = heuristic
         self.bidirectional = bidirectional
         self.adaptive_step = adaptive_step
@@ -27,25 +27,86 @@ ALGORITHM_CONFIG = AlgorithmConfig()
 
 
 class Node:
-    """each node has varieties:row,col,parent"""
+    """表示路径规划树中的节点，优化代价计算和父子关系维护"""
 
-    def __init__(self, r=0, c=0, f=None):
+    __slots__ = ("row", "col", "_parent", "_children", "_distance")  # 内存优化
+
+    def __init__(self, r=0, c=0, parent=None):
+        """
+        初始化节点
+        :param r: 行坐标
+        :param c: 列坐标
+        :param parent: 父节点引用，默认为None表示根节点
+        """
         self.row = r
         self.col = c
-        self.parent = f
-        self.distance = 0
-        parent = self.parent
-        # 如果路径发生了变动时（例如，节点可能会被修改或重连），循环计算distance才比较准确。
-        while True:
-            if parent == None:
-                break
-            self.distance += np.sqrt((r - parent.row) ** 2 + (c - parent.col) ** 2)
-            r = parent.row
-            c = parent.col
-            parent = parent.parent
+        self._parent = None
+        self._children = []  # 子节点注册表
+        self._distance = 0.0
+
+        # 使用属性setter进行初始化
+        self.parent = parent
+
+    @property
+    def parent(self):
+        """父节点访问器"""
+        return self._parent
+
+    @parent.setter
+    def parent(self, new_parent):
+        """
+        父节点修改器，自动维护树结构关系
+        时间复杂度: O(1) 基本操作 / O(k) 子节点更新 (k为子树规模)
+        """
+        if self._parent is new_parent:
+            return
+
+        # 解除旧父节点关系
+        if self._parent:
+            self._parent._children.remove(self)
+
+        # 建立新父节点关系
+        self._parent = new_parent
+        if new_parent:
+            new_parent._children.append(self)
+
+        # 触发代价更新
+        self._update_distance(propagate=True)
+
+    @property
+    def distance(self):
+        """节点到根节点的累积路径代价"""
+        return self._distance
+
+    def _update_distance(self, propagate=False):
+        """
+        更新节点路径代价，可选是否传播到子树
+        :param propagate: 是否递归更新子节点
+        """
+        # 基例：根节点代价为0
+        if self.parent is None:
+            new_dist = 0.0
+        else:
+            # 增量式计算：父节点代价 + 局部欧氏距离
+            new_dist = self.parent.distance + self._step_cost(self.parent)
+
+        # 判断是否需要更新
+        if abs(new_dist - self._distance) > 1e-9:  # 浮点精度容差
+            self._distance = new_dist
+            # 递归更新子节点
+            if propagate:
+                for child in self._children:
+                    child._update_distance(propagate=True)
+
+    def _step_cost(self, other: "Node") -> float:
+        """计算与相邻节点的局部路径代价"""
+        return np.hypot(self.row - other.row, self.col - other.col)
 
     def __str__(self):
         return f"({self.row}, {self.col})"
+
+    def __repr__(self):
+        return f"Node({self.row}, {self.col}, distance={self.distance:.2f})"
 
 
 class RRT:
@@ -107,6 +168,7 @@ class RRT:
         """设置起点"""
         self.start = Node(start_row, start_col)
         self.start_tree = [self.start]
+        self.iter_num = 0
 
     def set_end(self, end_row, end_col):
         """设置终点"""
@@ -193,7 +255,6 @@ class RRT:
     def sample(self, informed_sample_flag: bool):
         if not informed_sample_flag or not ALGORITHM_CONFIG.heuristic:
             return self.random_sample()
-
         cMax = self.less_long_path
         cMin = self.cMin
         if cMax == np.inf or abs(cMax - cMin) < 50:
@@ -251,14 +312,36 @@ class RRT:
             new_node = Node(add_row, add_col, nearest_node)
 
         if GLOBAL_CONFIG["rewire"]:
-            for node in tree:
-                distance = np.sqrt((new_node.col - node.col) ** 2 + (new_node.row - node.row) ** 2)
-                if distance < int(adaptive_step):
-                    if node == new_node.parent or node == self.start or node == self.end:
-                        continue
-                    if distance + new_node.distance < node.distance:
-                        node.parent = new_node
-                        node.distance = distance + new_node.distance
+            # 使用KD-Tree加速邻居搜索
+            points = np.array([[n.row, n.col] for n in tree])
+            kdtree = cKDTree(points)
+            rewire_radius = 2.5 * adaptive_step  # 扩展搜索半径
+            neighbors_indices = kdtree.query_ball_point([new_node.row, new_node.col], rewire_radius)
+
+            for idx in neighbors_indices:
+                node = tree[idx]
+                # 跳过无效节点
+                if node in (new_node.parent, self.start, self.end):
+                    continue
+
+                # 计算潜在新路径代价
+                new_cost = new_node.distance + np.hypot(node.row - new_node.row, node.col - new_node.col)
+
+                # 仅当满足以下条件时重布线
+                if new_cost < node.distance - 1e-6 and not has_collision(  # 考虑浮点误差
+                    self.col_map, new_node, node, method=ALGORITHM_CONFIG.collision_method
+                ):
+
+                    # 仅需设置parent，distance会自动更新
+                    node.parent = new_node  # 这会触发_distance的递归更新
+
+                    # 维护树结构双向连接
+                    if hasattr(node, "_children"):
+                        # 如果原父节点存在，通知其更新
+                        original_parent = node.parent
+                        if original_parent and hasattr(original_parent, "_children"):
+                            original_parent._children.remove(node)
+                        new_node._children.append(node)
 
         if has_collision(self.col_map, nearest_node, new_node, method=ALGORITHM_CONFIG.collision_method):
             if tree_index == 2:
@@ -278,6 +361,7 @@ class RRT:
         return new_node
 
     def spring(self, tree_index, informed_sample_flag=True):
+        self.iter_num += 1
         if not ALGORITHM_CONFIG.bidirectional:
             # 强制使用单向搜索逻辑
             tree_index = 1  # 始终操作start_tree
@@ -499,10 +583,8 @@ class RRT:
                     break
                 if self.is_success == False:  # 表示路径长度收敛了
                     break
-                # time.sleep(1)
                 self.t_iter_begin = time.time()
-                # self.init_map()
-                self.update_path()
+                self.extend(informed_sample_flag=True)
                 self.t_iter_end = time.time()
                 print("iter %d : path" % (i + 1), self.path_length, "time cost: ", self.t_iter_end - self.t_iter_begin)
             print("最优路径长度为：", self.less_long_path)
@@ -521,7 +603,7 @@ class RRT:
             # 绘制途经点
             self.ax.scatter(y_vals, x_vals, color="red", label="途经点", s=10, zorder=100)
             self.fig.canvas.draw()
-
+        # print(self.iter_num, "次迭代")
         return self.path_final
 
     def optim_path(self, path):
@@ -660,14 +742,14 @@ def test_rrt_with_config(n=20, configs=None):
     file_pattern = os.path.join(script_dir, "result_*")
     result_files = glob.glob(file_pattern)
     for file_path in result_files:
-        if os.path.isfile(file_path):  # 确保是文件（不是文件夹）
+        if os.path.isfile(file_path):
             os.remove(file_path)
             print(f"删除文件: {file_path}")
 
     # 默认测试配置
     if configs is None:
         configs = [
-            # ("Baseline", AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False, collision_method="discrete")),
+            ("Baseline", AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False, collision_method="discrete")),
             ("Bidirectional", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="discrete")),
             ("+Bresenham", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
             ("+Heuristic", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
@@ -676,7 +758,7 @@ def test_rrt_with_config(n=20, configs=None):
         ]
 
     # 生成测试用例（所有配置共享同一组测试用例）
-    np.random.seed(999)
+    np.random.seed(0)
     test_cases = []
     col_map = utils.test_map()
     while len(test_cases) < n:
@@ -694,6 +776,7 @@ def test_rrt_with_config(n=20, configs=None):
         success = 0
         total_time = 0
         path_lengths = []
+        total_iter_num = 0
 
         ALGORITHM_CONFIG = cfg[1]
         # 开始性能分析
@@ -718,6 +801,7 @@ def test_rrt_with_config(n=20, configs=None):
                     success += 1
                     total_time += elapsed
                     path_lengths.append(rrt.less_long_path)
+                    total_iter_num += rrt.iter_num
             except Exception as e:
                 print(f"测试失败：{str(e)}")
                 raise RuntimeError
@@ -730,17 +814,22 @@ def test_rrt_with_config(n=20, configs=None):
         # 记录结果
         avg_time = total_time / success if success > 0 else 0
         avg_length = np.mean(path_lengths) if path_lengths else 0
+        avg_iter_num = total_iter_num / success if success > 0 else 0
         success_rate = success / len(test_cases)
 
-        results[cfg[0]] = {"success_rate": success_rate, "avg_time": avg_time, "avg_length": avg_length}
+        results[cfg[0]] = {"success_rate": success_rate, "avg_time": avg_time, "avg_length": avg_length, "avg_iter_num": avg_iter_num}
 
     # 打印结果
     print("\n=== 测试结果汇总 ===")
-    print("{:<20} {:<15} {:<15} {:<15}".format("配置名称", "成功率", "平均时间(s)", "平均长度"))
+    print("{:<20} {:<15} {:<15} {:<15} {:<10}".format("配置名称", "成功率", "平均时间(s)", "平均长度", "平均迭代次数"))
 
     for name in results.keys():
         data = results[name]
-        print("{:<20} {:<15.2%} {:<15.6f} {:<15.6f}".format(name, data["success_rate"], data["avg_time"], data["avg_length"]))
+        print(
+            "{:<20} {:<15.2%} {:<15.6f} {:<15.6f} {:<10}".format(
+                name, data["success_rate"], data["avg_time"], data["avg_length"], data["avg_iter_num"]
+            )
+        )
 
     return results
 
