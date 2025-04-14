@@ -302,7 +302,7 @@ class RRT:
             adaptive_step = self.step_size
 
         # 新节点距离nearest_node不超过步长，如果生成的随机节点超过步长则在线段上截取步长
-        distance = np.sqrt((nearest_node.row - new_r) ** 2 + (nearest_node.col - new_c) ** 2)
+        distance = math.sqrt((nearest_node.row - new_r) ** 2 + (nearest_node.col - new_c) ** 2)
         if distance <= adaptive_step:
             new_node = Node(new_r, new_c, nearest_node)
         else:
@@ -399,7 +399,7 @@ class RRT:
             return True
         else:
             while True:
-                distance = np.sqrt((new_node2.col - new_node.col) ** 2 + (new_node2.row - new_node.row) ** 2)
+                distance = math.sqrt((new_node2.col - new_node.col) ** 2 + (new_node2.row - new_node.row) ** 2)
                 if ALGORITHM_CONFIG.adaptive_step:
                     adaptive_step = self.calculate_step_size(new_node2)
                 else:
@@ -492,7 +492,7 @@ class RRT:
         # print(self.path)
         self.path_length = 0
         for i in range(len(self.path) - 1):
-            self.path_length += np.sqrt((self.path[i].row - self.path[i + 1].row) ** 2 + (self.path[i].col - self.path[i + 1].col) ** 2)
+            self.path_length += math.sqrt((self.path[i].row - self.path[i + 1].row) ** 2 + (self.path[i].col - self.path[i + 1].col) ** 2)
         print("Current path len:", self.path_length, end=", ")
 
         if self.path_length <= self.less_long_path:
@@ -540,15 +540,15 @@ class RRT:
                         while True:
                             if temp_node == self.start:
                                 break
-                            dis += np.sqrt((temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
+                            dis += math.sqrt((temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
                             temp_node = temp_node.parent
                         temp_node = temp2
                         while True:
                             if temp_node == self.end:
                                 break
-                            dis += np.sqrt((temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
+                            dis += math.sqrt((temp_node.row - temp_node.parent.row) ** 2 + (temp_node.col - temp_node.parent.col) ** 2)
                             temp_node = temp_node.parent
-                        dis += np.sqrt((temp1.row - temp2.row) ** 2 + (temp1.col - temp2.col) ** 2)
+                        dis += math.sqrt((temp1.row - temp2.row) ** 2 + (temp1.col - temp2.col) ** 2)
                     if dis < path_all_length:
                         t1 = temp1
                         t2 = temp2
@@ -651,8 +651,8 @@ class RRT:
                 path.append(node)
                 node = node.parent
             path = path[::-1]
-        # return self.optim_path(path)
-        return path
+        return self.optim_path(path)
+        # return path
 
     # draw arcs to find the better path
     def update_path(self):
@@ -749,12 +749,12 @@ def test_rrt_with_config(n=20, configs=None):
     # 默认测试配置
     if configs is None:
         configs = [
-            ("Baseline", AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False, collision_method="discrete")),
-            ("Bidirectional", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="discrete")),
+            # ("Baseline", AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False, collision_method="discrete")),
+            # ("Bidirectional", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="discrete")),
             ("+Bresenham", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
-            ("+Heuristic", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
-            ("+AdaptiveStep", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
-            ("All", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
+            # ("+Heuristic", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
+            # ("+AdaptiveStep", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
+            # ("All", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
         ]
 
     # 生成测试用例（所有配置共享同一组测试用例）

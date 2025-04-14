@@ -405,6 +405,14 @@ def animate_path(animation_data, maps, path, start_time, collision_info=None):
     plt.show()
 
 
+def calculate_path_len(path: list):
+    """计算两点之间的距离"""
+    path_length = 0
+    for i in range(len(path) - 1):
+        path_length += math.sqrt((path[i][0] - path[i + 1][0]) ** 2 + (path[i][1] - path[i + 1][1]) ** 2)
+    return path_length
+
+
 @contextmanager
 def timer():
     start = time.perf_counter()
