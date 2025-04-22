@@ -18,8 +18,8 @@ class Env:
         self.motions = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
         self.obs = {(i, j) for i, row in enumerate(utils.test_map()) for j, val in enumerate(row) if val == 1}
 
-    def update_obs(self, obs):
-        self.obs = obs
+    def update_obs(self, map):
+        self.obs = {(i, j) for i, row in enumerate(map) for j, val in enumerate(row) if val == 1}
 
     def obs_map(self):
         return self.obs

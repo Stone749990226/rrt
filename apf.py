@@ -1,3 +1,4 @@
+from matplotlib.patches import Circle
 import numpy as np
 import matplotlib.pyplot as plt
 from time import time
@@ -11,7 +12,17 @@ class APF:
     """人工势场法路径规划 (NumPy优化版)"""
 
     def __init__(
-        self, start, goal, obstacles, k_att=1.0, k_rep=0.9, rr=40, step_size=1, max_iters=10000, goal_threshold=1, is_plot=GLOBAL_CONFIG["animation"]
+        self,
+        start,
+        goal,
+        obstacles,
+        k_att=1.0,
+        k_rep=0.9,
+        rr=40,
+        step_size=1,
+        max_iters=10000,
+        goal_threshold=1,
+        animation_flag=GLOBAL_CONFIG["animation"],
     ):
         """
         :param start: 起点 (row, col)
@@ -31,7 +42,7 @@ class APF:
         self.step_size = step_size
         self.max_iters = max_iters
         self.goal_threshold = goal_threshold
-        self.is_plot = is_plot
+        self.animation_flag = animation_flag
 
         # 运行状态
         self.current_pos = self.start.copy()
@@ -45,7 +56,7 @@ class APF:
         self.delta_t = 0.01
 
         # 初始化可视化
-        if self.is_plot:
+        if self.animation_flag:
             self.fig, self.ax = plt.subplots(figsize=(12, 7))
             self.ax.set_xlim(0, GLOBAL_CONFIG["width"])
             self.ax.set_ylim(0, GLOBAL_CONFIG["height"])
@@ -56,7 +67,7 @@ class APF:
             self.ax.scatter([x[1] for x in self.obstacles], [x[0] for x in self.obstacles], c="black", s=1, zorder=1)
             # for obs in self.obstacles:
             #     self.ax.add_patch(Circle(obs, radius=rr, alpha=0.3))
-            #     self.ax.plot(*obs, 'xk')
+            #     self.ax.plot(*obs, "xk")
             plt.show(block=False)
 
     def attractive_force(self):
@@ -118,7 +129,7 @@ class APF:
             self.path[self.iters] = self.current_pos
 
             # 可视化更新
-            if self.is_plot and self.iters % self.plot_interval == 0:
+            if self.animation_flag and self.iters % self.plot_interval == 0:
                 self.ax.plot(self.current_pos[1], self.current_pos[0], ".b", markersize=2)
                 self.fig.canvas.draw_idle()
                 plt.pause(self.delta_t)
@@ -169,25 +180,50 @@ class APF_Improved(APF):
         return np.sum(forces, axis=0)
 
 
+def simple_apf_test():
+    start, goal = (0, 0), (15, 15)
+    matrix = np.zeros((17, 17), dtype=int)
+    obs = np.array([[1, 4], [2, 4], [3, 3], [6, 1], [6, 7], [10, 6], [11, 12], [14, 14]])
+    matrix[obs[:, 0], obs[:, 1]] = 1
+    apf = APF(start, goal, matrix, k_att=1, k_rep=100, rr=3, step_size=0.2, max_iters=10000, goal_threshold=0.2, is_plot=False)
+    # apf = APF_Improved(start, goal, matrix, k_att=1, k_rep=0.9, rr=3, step_size=0.2, max_iters=10000, goal_threshold=0.2, is_plot=False)
+    fig = plt.figure(figsize=(7, 7))
+    subplot = fig.add_subplot(111)
+    subplot.set_xlabel("X-distance: m")
+    subplot.set_ylabel("Y-distance: m")
+    subplot.plot(start[0], start[1], "*r")
+    subplot.plot(goal[0], goal[1], "*r")
+    for OB in obs:
+        circle = Circle(xy=(OB[0], OB[1]), radius=3, alpha=0.3)
+        subplot.add_patch(circle)
+        subplot.plot(OB[0], OB[1], "xk")
+
+    apf.path_plan()
+    px, py = [K[0] for K in apf.path], [K[1] for K in apf.path]  # 路径点x坐标列表, y坐标列表
+    subplot.plot(px, py, ".b")
+    plt.show()
+
+
 # 测试用例
 if __name__ == "__main__":
     # 参数设置(row, col)
-    start = (149, 1604)
-    goal = (1000, 71)
+    # start = (149, 1604)
+    # goal = (1000, 71)
 
-    # 创建路径规划器
-    apf = APF_Improved(start=start, goal=goal, obstacles=test_map())
+    # # 创建路径规划器
+    # apf = APF_Improved(start=start, goal=goal, obstacles=test_map())
 
-    # 执行路径规划
-    start_time = time()
-    success = apf.path_plan()
-    print(f"规划耗时: {time()-start_time:.2f}s")
+    # # 执行路径规划
+    # start_time = time()
+    # success = apf.path_plan()
+    # print(f"规划耗时: {time()-start_time:.2f}s")
 
-    if success:
-        print("路径规划成功!")
-        print(apf.path)
-        if apf.is_plot:
-            apf.ax.plot(apf.path[:, 1], apf.path[:, 0], "k-", lw=1)
-            plt.show()
-    else:
-        print("路径规划失败!")
+    # if success:
+    #     print("路径规划成功!")
+    #     print(apf.path)
+    #     if apf.is_plot:
+    #         apf.ax.plot(apf.path[:, 1], apf.path[:, 0], "k-", lw=1)
+    #         plt.show()
+    # else:
+    #     print("路径规划失败!")
+    simple_apf_test()

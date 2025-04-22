@@ -16,7 +16,7 @@ import utils
 
 
 class AlgorithmConfig:
-    def __init__(self, heuristic=False, bidirectional=True, adaptive_step=False, collision_method="bresenham"):
+    def __init__(self, heuristic=True, bidirectional=True, adaptive_step=False, collision_method="bresenham"):
         self.heuristic = heuristic
         self.bidirectional = bidirectional
         self.adaptive_step = adaptive_step
@@ -24,6 +24,8 @@ class AlgorithmConfig:
 
 
 ALGORITHM_CONFIG = AlgorithmConfig()
+
+OPTIM: bool = True  # 是否启用路径优化
 
 
 class Node:
@@ -122,7 +124,6 @@ class RRT:
         animation=False,
     ) -> None:
         np.random.seed(42)
-        self.t_iter_begin = time.time()
         self.height = height
         self.width = width
         self.step_size = step_size
@@ -166,6 +167,7 @@ class RRT:
 
     def set_start(self, start_row, start_col):
         """设置起点"""
+        self.state = 0  # 0: 正在搜索 1：算法收敛 -1：没有找到路径
         self.start = Node(start_row, start_col)
         self.start_tree = [self.start]
         self.iter_num = 0
@@ -248,16 +250,20 @@ class RRT:
         return self.col_map[point[0]][point[1]] == 1
 
     def random_sample(self):
+        if not ALGORITHM_CONFIG.bidirectional:
+            # 单向RRT以一定概率向终点采样
+            if np.random.sample() < 0.03:
+                return self.end.row, self.end.col
         new_r = np.random.uniform(0, self.height)
         new_c = np.random.uniform(0, self.width)
         return new_r, new_c
 
-    def sample(self, informed_sample_flag: bool):
-        if not informed_sample_flag or not ALGORITHM_CONFIG.heuristic:
+    def sample(self):
+        if not ALGORITHM_CONFIG.heuristic:
             return self.random_sample()
-        cMax = self.less_long_path
+        cMax = self.less_long_path_length
         cMin = self.cMin
-        if cMax == np.inf or abs(cMax - cMin) < 50:
+        if cMax == np.inf or abs(cMax - cMin) < 1e-4:
             # 如果尚未找到路径，退化为全图随机采样
             return self.random_sample()
 
@@ -360,14 +366,15 @@ class RRT:
 
         return new_node
 
-    def spring(self, tree_index, informed_sample_flag=True):
+    def spring(self, tree_index):
         self.iter_num += 1
         if not ALGORITHM_CONFIG.bidirectional:
             # 强制使用单向搜索逻辑
             tree_index = 1  # 始终操作start_tree
 
-        new_r, new_c = self.sample(informed_sample_flag)
-
+        new_r, new_c = self.sample()
+        if self.animation:
+            self.ax.scatter(new_c, new_r, c="orange", zorder=5, s=3)
         # 双向RRT，交替扩展
         if tree_index == 2:
             self.start_tree, self.end_tree = self.end_tree, self.start_tree
@@ -446,28 +453,27 @@ class RRT:
                 # 更换new_node2，进行迭代
                 new_node2 = new_node3
 
-    # expend nodes, flag is to figure whether to limit the new springed node's position
-    def extend(self, informed_sample_flag=False):
+    # expend nodes
+    def extend(self) -> int:
         # 如果extend的时间较大，大概率是因为此路径无法再优化了（椭圆内障碍物太多），这时直接退出就可以了;
         # 如果前后两次路径的差值小于1，则已收敛了
-        self.is_success = True
         while True:
             now = time.time()
-            # if now-self.t_s>10:S
-            #     print('no path')
-            #     exit()
+            if now - self.t_iter_begin > 3 and self.animation == False:
+                self.state = -1
+                return
             # 1. 如果当前路径和上次路径长度差异小于 path_len_diff 且路径已经收敛，则退出。
             # 2. 如果 算法运行时间超过 max_iter_time 秒，且至少已经找到一条路径，则退出
             if (
-                abs(self.last_path_length - self.less_long_path) < GLOBAL_CONFIG["path_len_diff"]
+                abs(self.last_path_length - self.less_long_path_length) < GLOBAL_CONFIG["path_len_diff"]
                 and len(self.path_all) > 1
-                and self.last_path_length != self.less_long_path
+                and self.last_path_length != self.less_long_path_length
                 or now - self.t_iter_begin > GLOBAL_CONFIG["max_iter_time"]
                 and len(self.path_all) > 0
             ):
-                self.is_success = False
                 print("当前算法已经收敛了")
-                return 0
+                self.state = 1
+                return
             # if now-self.t_s>0.5 and len(self.path_all)>0:
             #     self.is_success=False
             #     return 0
@@ -475,11 +481,11 @@ class RRT:
             # spring the tree first which has less nodes
             # 如果 start_tree（从起点生长的树）的节点数量 小于等于 end_tree（从终点生长的树），则扩展 start_tree。否则，扩展 end_tree。
             if ALGORITHM_CONFIG.bidirectional and len(self.start_tree) <= len(self.end_tree):
-                is_success = self.spring(1, informed_sample_flag)
+                connected: bool = self.spring(tree_index=1)
             else:
-                is_success = self.spring(2, informed_sample_flag)
-            if is_success:
-                temp = self.end_limitation()
+                connected = self.spring(tree_index=2)
+            if connected:
+                temp = self.connected_tree_node()
                 if temp != False:
                     self.path = self.results(temp)
                     break
@@ -495,7 +501,7 @@ class RRT:
             self.path_length += math.sqrt((self.path[i].row - self.path[i + 1].row) ** 2 + (self.path[i].col - self.path[i + 1].col) ** 2)
         print("Current path len:", self.path_length, end=", ")
 
-        if self.path_length <= self.less_long_path:
+        if self.path_length <= self.less_long_path_length:
             print("This path is better. Save!")
         else:
             print("This path is worse. Delete!")
@@ -504,12 +510,13 @@ class RRT:
         # print('搜索时间为:', t_e - self.t_s)
         self.last_path_length = self.path_length
         # 如果新生成的路径长度小于原来的长度，则绘出
-        if self.path_length <= self.less_long_path:
-            self.less_long_path = self.path_length
+        if self.path_length <= self.less_long_path_length:
+            self.less_long_path_length = self.path_length
             self.path_all.append(self.path)
 
             if self.animation:
                 self.draw_path()
+        return
 
     def draw_path(self):
         x_values = [[self.path[i].col, self.path[i + 1].col] for i in range(len(self.path) - 1)]
@@ -523,7 +530,7 @@ class RRT:
     # end requirement,返回的是能连接两个tree，且使得总长度最小的两个点
     # 在 双向 RRT 算法中，两棵树扩展到一定程度后，需要合并形成完整路径。这个函数就是寻找两棵树之间的最佳连接点，使得最终路径最短
     # 计算 start → temp1 → temp2 → end 这条完整路径
-    def end_limitation(self):
+    def connected_tree_node(self):
         if ALGORITHM_CONFIG.bidirectional:
             # t1,t2是两个可连接的节点
             t1 = None
@@ -550,6 +557,7 @@ class RRT:
                             temp_node = temp_node.parent
                         dis += math.sqrt((temp1.row - temp2.row) ** 2 + (temp1.col - temp2.col) ** 2)
                     if dis < path_all_length:
+                        path_all_length = dis
                         t1 = temp1
                         t2 = temp2
             if t1 == None:
@@ -559,9 +567,10 @@ class RRT:
             nearest_to_goal = min(self.start_tree, key=lambda n: (n.row - self.end.row) ** 2 + (n.col - self.end.col) ** 2)
             return nearest_to_goal, self.end  # 返回最近节点和终点
 
-    def search_path(self, iternation=GLOBAL_CONFIG["iteration"]):
+    def search_path(self, iternation=GLOBAL_CONFIG["iteration"]) -> bool:
+        """返回是否找到路径"""
         # 截止本次iter的最短路径长度
-        self.less_long_path = np.inf
+        self.less_long_path_length = np.inf
         # 上一次路径长度，如果变化小于设定值，则认为路径收敛
         self.last_path_length = np.inf
         self.path_all = []
@@ -576,18 +585,21 @@ class RRT:
             self.t_search_begin = time.time()
             self.t_iter_begin = time.time()
             self.extend()
+            if self.state == -1:
+                print("没有找到路径")
+                return False
             # 终止条件为迭代iternation次
             # 提前结束条件为：有成功路径且搜索时间超过1s/某次搜索的时间过长/路径长度收敛
             for i in range(iternation):
                 if time.time() - self.t_search_begin > GLOBAL_CONFIG["max_search_time"] and len(self.path_all) > 0:
                     break
-                if self.is_success == False:  # 表示路径长度收敛了
+                if self.state == 1:  # 表示路径长度收敛了
                     break
                 self.t_iter_begin = time.time()
-                self.extend(informed_sample_flag=True)
+                self.extend()
                 self.t_iter_end = time.time()
                 print("iter %d : path" % (i + 1), self.path_length, "time cost: ", self.t_iter_end - self.t_iter_begin)
-            print("最优路径长度为：", self.less_long_path)
+            print("最优路径长度为：", self.less_long_path_length)
             t_search_end = time.time()
             print("总时间为:", t_search_end - self.t_search_begin)
             # self.init_map()
@@ -651,16 +663,9 @@ class RRT:
                 path.append(node)
                 node = node.parent
             path = path[::-1]
-        return self.optim_path(path)
-        # return path
-
-    # draw arcs to find the better path
-    def update_path(self):
-        # node list
-        self.start_tree = [self.start]
-        if ALGORITHM_CONFIG.bidirectional:
-            self.end_tree = [self.end]
-        self.extend(informed_sample_flag=True)
+        if OPTIM:
+            return self.optim_path(path)
+        return path
 
     def print_path(self):
         if self.path is not None:
@@ -730,8 +735,58 @@ def has_collision(col_map, node1: Node, node2: Node, method="bresenham") -> bool
         return False
 
 
-def test_rrt_with_config(n=20, configs=None):
-    global ALGORITHM_CONFIG
+def path_planning_testcase(pair_num, filename="testcases.pkl"):
+    import os
+    import pickle
+
+    if os.path.exists(filename):
+        # 如果文件存在，直接加载
+        with open(filename, "rb") as f:
+            testcases = pickle.load(f)
+        print("加载测试用例成功")
+    else:
+        from PIL import Image
+        from scipy.ndimage import binary_dilation, binary_fill_holes
+
+        png_files = [f for f in os.listdir("data") if f.endswith(".png")]
+        testcases = []
+
+        def cross_structure(radius):
+            size = 2 * radius + 1
+            structure = np.zeros((size, size), dtype=bool)
+            center = radius
+            structure[center, :] = True  # 水平线
+            structure[:, center] = True  # 垂直线
+            return structure
+
+        for file in png_files:
+            print(f"正在处理文件: {file}")
+            pair_list = []
+            col_map = np.array(Image.open(os.path.join("data", file)).convert("L"))
+            # structure = cross_structure(15)
+            # col_map[:] = binary_dilation(col_map, structure=structure).astype(np.uint8)
+            col_map[:] = binary_fill_holes(col_map)
+            while len(pair_list) < pair_num:
+                start_r = np.random.randint(0, GLOBAL_CONFIG["height"])
+                start_c = np.random.randint(0, GLOBAL_CONFIG["width"])
+                end_r = np.random.randint(0, GLOBAL_CONFIG["height"])
+                end_c = np.random.randint(0, GLOBAL_CONFIG["width"])
+                # 过滤起点和终点就在障碍物上的测试用例
+                if (
+                    col_map[start_r][start_c] == 0
+                    and col_map[end_r][end_c] == 0
+                    and has_collision(col_map, Node(start_r, start_c), Node(end_r, end_c))
+                ):
+                    pair_list.append(((start_r, start_c), (end_r, end_c)))
+            testcases.append((col_map, pair_list))
+        with open(filename, "wb") as f:
+            pickle.dump(testcases, f)
+    return testcases
+
+
+def test_rrt_with_config(pair_num=50, configs=None):
+    global ALGORITHM_CONFIG, OPTIM
+    OPTIM = False
     import cProfile
     import os
     import glob
@@ -749,31 +804,22 @@ def test_rrt_with_config(n=20, configs=None):
     # 默认测试配置
     if configs is None:
         configs = [
-            # ("Baseline", AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False, collision_method="discrete")),
-            # ("Bidirectional", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="discrete")),
+            ("Baseline", AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False, collision_method="discrete")),
+            ("Bidirectional", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="discrete")),
             ("+Bresenham", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
-            # ("+Heuristic", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
-            # ("+AdaptiveStep", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
-            # ("All", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
+            ("+Heuristic", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=False, collision_method="bresenham")),
+            ("+AdaptiveStep", AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
+            ("All", AlgorithmConfig(heuristic=True, bidirectional=True, adaptive_step=True, collision_method="bresenham")),
         ]
 
     # 生成测试用例（所有配置共享同一组测试用例）
     np.random.seed(0)
-    test_cases = []
-    col_map = utils.test_map()
-    while len(test_cases) < n:
-        start_r = np.random.randint(0, GLOBAL_CONFIG["height"])
-        start_c = np.random.randint(0, GLOBAL_CONFIG["width"])
-        end_r = np.random.randint(0, GLOBAL_CONFIG["height"])
-        end_c = np.random.randint(0, GLOBAL_CONFIG["width"])
-        # 过滤起点和终点就在障碍物上的测试用例
-        if col_map[start_r][start_c] == 0 and col_map[end_r][end_c] == 0 and has_collision(col_map, Node(start_r, start_c), Node(end_r, end_c)):
-            test_cases.append(((start_r, start_c), (end_r, end_c)))
+    testcases = path_planning_testcase(pair_num)
 
     results = {}
     for cfg in configs:
         print(f"\n=== 正在测试配置：{cfg[0]} ===")
-        success = 0
+        success_num = 0
         total_time = 0
         path_lengths = []
         total_iter_num = 0
@@ -782,40 +828,38 @@ def test_rrt_with_config(n=20, configs=None):
         # 开始性能分析
         profiler = cProfile.Profile()
         profiler.enable()
-        rrt = RRT(
-            start=None,
-            end=None,
-        )
-        rrt.set_col_map(col_map)
-        for start, end in test_cases:
-            start_node = Node(start[0], start[1])
-            end_node = Node(end[0], end[1])
-            rrt.set_start(start_node.row, start_node.col)
-            rrt.set_end(end_node.row, end_node.col)
-            try:
-                start_time = time.time()
-                path = rrt.search_path()
-                elapsed = time.time() - start_time
-
-                if path:
-                    success += 1
-                    total_time += elapsed
-                    path_lengths.append(rrt.less_long_path)
-                    total_iter_num += rrt.iter_num
-            except Exception as e:
-                print(f"测试失败：{str(e)}")
-                raise RuntimeError
-                continue
+        for i, testcase in enumerate(testcases):
+            print(f"正在测试第 {i} 个测试用例")
+            col_map, pair_list = testcase
+            rrt = RRT(start=None, end=None, animation=False)
+            rrt.set_col_map(col_map)
+            for start, end in pair_list:
+                start_node = Node(start[0], start[1])
+                end_node = Node(end[0], end[1])
+                rrt.set_start(start_node.row, start_node.col)
+                rrt.set_end(end_node.row, end_node.col)
+                try:
+                    start_time = time.time()
+                    success = rrt.search_path()
+                    elapsed = time.time() - start_time
+                    if success:
+                        success_num += 1
+                        total_time += elapsed
+                        path_lengths.append(rrt.less_long_path_length)
+                        total_iter_num += rrt.iter_num
+                except Exception as e:
+                    print(f"测试失败：{str(e)}")
+                    raise RuntimeError
         profiler.disable()  # 停止性能分析
         with open("result_" + cfg[0] + ".txt", "w") as f:
             with redirect_stdout(f):
                 profiler.print_stats(sort="time")
 
         # 记录结果
-        avg_time = total_time / success if success > 0 else 0
+        avg_time = total_time / success_num if success_num > 0 else 0
         avg_length = np.mean(path_lengths) if path_lengths else 0
-        avg_iter_num = total_iter_num / success if success > 0 else 0
-        success_rate = success / len(test_cases)
+        avg_iter_num = total_iter_num / success_num if success_num > 0 else 0
+        success_rate = success_num / (len(testcases) * pair_num)
 
         results[cfg[0]] = {"success_rate": success_rate, "avg_time": avg_time, "avg_length": avg_length, "avg_iter_num": avg_iter_num}
 
@@ -826,7 +870,7 @@ def test_rrt_with_config(n=20, configs=None):
     for name in results.keys():
         data = results[name]
         print(
-            "{:<20} {:<15.2%} {:<15.6f} {:<15.6f} {:<10}".format(
+            "{:<20} {:<15.2%} {:<15.4f} {:<15.4f} {:<10}".format(
                 name, data["success_rate"], data["avg_time"], data["avg_length"], data["avg_iter_num"]
             )
         )
@@ -834,17 +878,32 @@ def test_rrt_with_config(n=20, configs=None):
     return results
 
 
+def test_single_vs_bidirectional():
+    global ALGORITHM_CONFIG, OPTIM
+    OPTIM = False
+    # 测试单向RRT和双向RRT的性能差异
+    ALGORITHM_CONFIG = AlgorithmConfig(heuristic=False, bidirectional=False, adaptive_step=False)
+    start = (362, 358)
+    goal = (570, 723)
+    speed = 4
+    rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=False)
+    rrt_agent.set_col_map(utils.test_map())
+    rrt_agent.search_path(iternation=0)
+    plt.show()
+
+
 if __name__ == "__main__":
-    test_rrt_with_config(100)
+    test_rrt_with_config()
+    # test_single_vs_bidirectional()
     # start_time = "202411130715"
     # mark_time = "202411130715"
     # start = (149, 1604)
     # goal = (88, 1813)
     # speed = 4
-    # ALGORITHM_CONFIG = AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")
+    # # ALGORITHM_CONFIG = AlgorithmConfig(heuristic=False, bidirectional=True, adaptive_step=True, collision_method="bresenham")
     # rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=GLOBAL_CONFIG["animation"])
     # png_paths = get_images_path(start_time, mark_time)
-    # combined_map = generate_combined_map(png_paths, speed, start, start_time)
+    # combined_map = generate_combined_map(png_paths, speed, start, start_time, safety_radius=15)
     # rrt_agent.set_col_map(combined_map)
     # plt.show()
 

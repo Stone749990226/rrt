@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from matplotlib import animation, pyplot as plt
 from matplotlib import patches
 from config import GLOBAL_CONFIG
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, binary_fill_holes
 import re
 
 maps = {}
@@ -27,12 +27,12 @@ def align_time_15m(time_str: str):
     return aligned_time.strftime("%Y%m%d%H%M")
 
 
-def get_images_path(start_time, mark_time):
+def get_images_path(start_time, mark_time, local_image_path="./07-00"):
     """/data/ImageData/20241206/11/cloud_dugs_unet_3h/16-45"""
     res = []
     start_time_obj = datetime.strptime(start_time, "%Y%m%d%H%M")
     if GLOBAL_CONFIG["env_mode"] == "local":
-        for root, dirs, files in os.walk("./07-00"):
+        for root, dirs, files in os.walk(local_image_path):
             for file in files:
                 if file.endswith(".png"):
                     time_str = file.split(".")[0]
@@ -125,8 +125,7 @@ def generate_combined_map(
         return structure
 
     # 形态学膨胀，增加障碍物的安全边界
-    combined_map = binary_dilation(combined_map, structure=cross_structure(safety_radius)).astype(np.uint8)
-    return combined_map
+    return binary_fill_holes(binary_dilation(combined_map, structure=cross_structure(safety_radius)).astype(np.uint8))
 
 
 def test_map():
@@ -338,12 +337,12 @@ def animate_path(animation_data, maps, path, start_time, collision_info=None):
     fig, ax = plt.subplots(figsize=(12, 7))
     ax.set_aspect("equal")
     current_map_time = animation_data[0]["map_time"] if animation_data else collision_info["map_time"]
-    img = ax.imshow(maps[current_map_time], cmap="gray", origin="upper")
-
+    img = ax.imshow(maps[current_map_time], cmap="binary", origin="upper")
+    path = [path[0], path[-1]]
     path_rows = [p[0] for p in path]
     path_cols = [p[1] for p in path]
     ax.plot(path_cols, path_rows, "r--", alpha=0.3)
-    ax.scatter(path_cols, path_rows, c="red", s=20)
+    ax.scatter(path_cols, path_rows, c="red", s=1)
 
     (traj_line,) = ax.plot([], [], "b-", lw=1.5)
     (current_dot,) = ax.plot([], [], "bo", ms=8)
@@ -415,9 +414,9 @@ def calculate_path_len(path: list):
 
 @contextmanager
 def timer():
-    start = time.perf_counter()
+    start = time.time()
     yield
-    end = time.perf_counter()
+    end = time.time()
     print(f"耗时: {end - start:.4f} 秒")
 
 
