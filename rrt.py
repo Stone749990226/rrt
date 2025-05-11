@@ -246,8 +246,8 @@ class RRT:
             self.obs_scatter.set_offsets(obstacle_positions[:, [1, 0]])
             self.fig.canvas.draw()
 
-    def point_in_obstacle(self, point):
-        return self.col_map[point[0]][point[1]] == 1
+    def point_in_obstacle(self, row: int, col: int):
+        return self.col_map[int(row)][int(col)] == 1
 
     def random_sample(self):
         if not ALGORITHM_CONFIG.bidirectional:
@@ -581,6 +581,10 @@ class RRT:
             self.path_all = [[self.start, self.end]]
             if self.animation:
                 self.draw_path()
+        elif self.point_in_obstacle(self.start.row, self.start.col) or self.point_in_obstacle(self.end.row, self.end.col):
+            logging.info("起点或终点为障碍物，请重新选择")
+            print("起点或终点为障碍物，请重新选择")
+            return False
         else:
             self.t_search_begin = time.time()
             self.t_iter_begin = time.time()
@@ -865,15 +869,11 @@ def test_rrt_with_config(pair_num=50, configs=None):
 
     # 打印结果
     print("\n=== 测试结果汇总 ===")
-    print("{:<20} {:<15} {:<15} {:<15} {:<10}".format("配置名称", "成功率", "平均时间(s)", "平均长度", "平均迭代次数"))
+    print("{:<20} {:<15} {:<15} {:<15}".format("配置名称", "成功率", "平均时间(s)", "平均长度"))
 
     for name in results.keys():
         data = results[name]
-        print(
-            "{:<20} {:<15.2%} {:<15.4f} {:<15.4f} {:<10}".format(
-                name, data["success_rate"], data["avg_time"], data["avg_length"], data["avg_iter_num"]
-            )
-        )
+        print("{:<20} {:<15.2%} {:<15.4f} {:<15.4f}".format(name, data["success_rate"], data["avg_time"], data["avg_length"]))
 
     return results
 
@@ -886,7 +886,7 @@ def test_single_vs_bidirectional():
     start = (362, 358)
     goal = (570, 723)
     speed = 4
-    rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=False)
+    rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=True)
     rrt_agent.set_col_map(utils.test_map())
     rrt_agent.search_path(iternation=0)
     plt.show()

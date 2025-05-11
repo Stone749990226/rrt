@@ -185,8 +185,8 @@ def simple_apf_test():
     matrix = np.zeros((17, 17), dtype=int)
     obs = np.array([[1, 4], [2, 4], [3, 3], [6, 1], [6, 7], [10, 6], [11, 12], [14, 14]])
     matrix[obs[:, 0], obs[:, 1]] = 1
-    apf = APF(start, goal, matrix, k_att=1, k_rep=100, rr=3, step_size=0.2, max_iters=10000, goal_threshold=0.2, is_plot=False)
-    # apf = APF_Improved(start, goal, matrix, k_att=1, k_rep=0.9, rr=3, step_size=0.2, max_iters=10000, goal_threshold=0.2, is_plot=False)
+    apf = APF(start, goal, matrix, k_att=1, k_rep=100, rr=3, step_size=0.2, max_iters=10000, goal_threshold=0.2, animation_flag=False)
+    # apf = APF_Improved(start, goal, matrix, k_att=1, k_rep=0.9, rr=3, step_size=0.2, max_iters=10000, goal_threshold=0.2, animation_flag=False)
     fig = plt.figure(figsize=(7, 7))
     subplot = fig.add_subplot(111)
     subplot.set_xlabel("X-distance: m")

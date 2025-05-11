@@ -27,7 +27,7 @@ parser.add_argument("--path_len_diff", default=1, help="", type=int)
 parser.add_argument("--animation", action="store_true", help="whether show animation")
 parser.add_argument("--rewire", action="store_true", help="RRT algorithm use rewire(目前存在问题)")
 parser.add_argument("--image_path", default="/data/ImageData/", type=str, help="图片地址")
-parser.add_argument("--env", choices=["local", "production"], default="local", help="指定运行环境（默认：local）")  # 允许的值  # 默认值
+parser.add_argument("--env", choices=["local", "server"], default="server", help="指定运行环境（默认：local）")
 
 
 maps = {}
@@ -104,6 +104,7 @@ class RequestBody(BaseModel):
     time_step: int
     mark_time: str
     start_time: str
+    # 弃用
     threshold: float
     structure_size: int
 
@@ -148,16 +149,19 @@ def calculate_response(data: RequestBody) -> ResponseBody:
     png_paths = get_images_path(start_time, mark_time)
 
     rrt_agent = RRT(
+        Node(row_start, col_start),
+        Node(row_goal, col_goal),
         config.GLOBAL_CONFIG["width"],
         config.GLOBAL_CONFIG["height"],
         config.GLOBAL_CONFIG["step_size"],
         config.GLOBAL_CONFIG["end_lim"],
-        Node(row_start, col_start),
-        Node(row_goal, col_goal),
     )
     rrt_agent.set_col_map(generate_combined_map(png_paths, speed=speed, start_point=(row_start, col_start), start_time=start_time))
 
-    if rrt_agent.point_in_obstacle((row_start, col_start)) or rrt_agent.point_in_obstacle((row_goal, col_goal)):
+    rrt_agent.set_col_map(generate_combined_map(png_paths, speed=speed, start_point=(row_start, col_start), start_time=start_time, safety_radius=15))
+
+    success = rrt_agent.search_path()
+    if not success:
         route = Route(
             start_point=data.start,
             end_point=data.end,
@@ -165,8 +169,9 @@ def calculate_response(data: RequestBody) -> ResponseBody:
         )
         summary = Summary(distance_haversine=0, estimated_time=0, find_path=False, detail="start or end point is in obstacle")
         logging.error("start or end point is in obstacle")
+        print("can't find path")
         return ResponseBody(route=route, summary=summary)
-    path = rrt_agent.search_path()
+    path = rrt_agent.path_final
     if GLOBAL_CONFIG["animation"]:
         print(path)
         check_path_collision(path=path, speed=speed, start_time=start_time, animation_flag=GLOBAL_CONFIG["animation"])
@@ -211,7 +216,7 @@ def calculate_response(data: RequestBody) -> ResponseBody:
 
 
 # 定义 POST 路由
-@app.post("/routing/route", response_model=ResponseBody)
+@app.post("/api/route", response_model=ResponseBody)
 async def calculate_route(request: RequestBody):
     response = calculate_response(request)
     return response
@@ -233,6 +238,7 @@ if __name__ == "__main__":
     config.set_config("animation", args.animation)
     config.set_config("rewire", args.rewire)
     config.set_config("image_path", args.image_path)
+    config.set_config("env_mode", args.env)
     # logging.info(GLOBAL_CONFIG)
     print(GLOBAL_CONFIG)
     uvicorn.run(app="main:app", host=args.app_host, port=args.app_port, log_level="info")

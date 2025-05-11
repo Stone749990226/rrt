@@ -14,7 +14,7 @@ def dynamic_test():
     goal = (88, 1813)
     speed = 6
     rrt_agent = RRT(Node(*start), Node(*goal), speed=speed, animation=True)
-    png_paths = get_images_path(start_time, mark_time)
+    png_paths = get_images_path(start_time, mark_time, local_image_path="./04-00")
     combined_map = generate_combined_map(png_paths, speed, start, start_time, safety_radius=15)
     rrt_agent.set_col_map(combined_map)
     rrt_agent.search_path()
@@ -22,7 +22,7 @@ def dynamic_test():
     check_path_collision(rrt_agent.path_final, speed, start_time, animation_flag=True)
 
 
-if __name__ == "__main__":
+def dynamic_test2():
     start_time = "202411130900"
     mark_time = "202411130845"
 
@@ -55,9 +55,11 @@ if __name__ == "__main__":
             i = path.index(collision_start)
             path = np.array(path[:i] + list(apf.path) + path[i + 2 :])
             print("APF重规划后路径长度", calculate_path_len(path))
-
         else:
             print("no collision")
             break
 
-    # dynamic_test()
+
+if __name__ == "__main__":
+    dynamic_test()
+    # dynamic_test2()
